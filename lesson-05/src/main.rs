@@ -2,9 +2,8 @@ use slug::slugify;
 use std::env;
 use std::error::Error;
 use std::io::{self, Write};
-
 mod csv_wrapper;
-use csv_wrapper::csv_wrapper::handle_input as handle_csv;
+use csv_wrapper::handle_input as handle_csv;
 
 const OPERATIONS: [&str; 5] = ["uppercase", "lowercase", "no-spaces", "slugify", "csv"];
 enum Operation {
@@ -21,18 +20,18 @@ fn handle_uppercase(input: &str) -> Result<String, Box<dyn Error>> {
     Ok(input.to_uppercase())
 }
 fn handle_no_spaces(input: &str) -> Result<String, Box<dyn Error>> {
-    Ok(input.replace(" ", ""))
+    Ok(input.replace(' ', ""))
 }
 fn handle_slugify(input: &str) -> Result<String, Box<dyn Error>> {
-    Ok(slugify(input.trim().to_string()))
+    Ok(slugify(input.trim()))
 }
 
 fn handle_operation(operation: &Operation, input: &str) -> Result<String, Box<dyn Error>> {
     match operation {
-        Operation::Uppercase => handle_uppercase(&input),
-        Operation::Lowercase => handle_lowercase(&input),
-        Operation::NoSpaces => handle_no_spaces(&input),
-        Operation::Slugify => handle_slugify(&input),
+        Operation::Uppercase => handle_uppercase(input),
+        Operation::Lowercase => handle_lowercase(input),
+        Operation::NoSpaces => handle_no_spaces(input),
+        Operation::Slugify => handle_slugify(input),
         _ => panic!("Unhandled operation!"),
     }
 }
@@ -45,14 +44,17 @@ fn handle_input(operation: &Operation) -> Result<Vec<String>, Box<dyn Error>> {
     match &operation {
         Operation::Csv => {
             let csv_output = handle_csv()?;
-            Ok(vec![format!("{:?}", csv_output.input), format!("\n{}", csv_output)])
+            Ok(vec![
+                format!("{:?}", csv_output.input),
+                format!("\n{}", csv_output),
+            ])
         }
         _ => {
             io::stdin()
                 .read_line(&mut input)
                 .expect("Failed to read input");
             input = input.trim().to_string();
-            match handle_operation(&operation, &input) {
+            match handle_operation(operation, &input) {
                 Ok(output) => {
                     //println!("Transmuted text: {}", output);
                     Ok(vec![input, output])
@@ -77,7 +79,7 @@ fn main() {
     }
     let operation = match args[1].as_str() {
         "uppercase" => {
-            format!("Operation: Uppercase");
+            println!("Operation: Uppercase");
             Operation::Uppercase
         }
         "lowercase" => {
@@ -97,7 +99,10 @@ fn main() {
             Operation::Csv
         }
         _ => {
-            eprintln!("Invalid operation: '{}', valid operations are: {:?}", args[1], OPERATIONS);
+            eprintln!(
+                "Invalid operation: '{}', valid operations are: {:?}",
+                args[1], OPERATIONS
+            );
             return;
         }
     };
