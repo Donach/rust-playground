@@ -1,0 +1,46 @@
+https://lib.rs/
+ - Categorized libraries
+
+https://crates.io/
+
+https://github.com/rust-unofficial/awesome-rust/
+
+
+
+Cargo - own crates published
+https://doc.rust-lang.org/cargo/reference/config.html
+
+Sercle
+DB: 
+    Diesel
+    - database 
+    sqlx - checks queries on compiletime by testing it againts test db
+Cli/Terminal: 
+    Clap
+    - arg parsing
+    Ternion, Crossterm
+Web: Rocket, Actix-web, Warp, Axum, hyper (http lib)
+Iterators: Rayon (parallel), Itertools (smarter), strum
+Logging: Log, Slog, Tracing (recomm)
+R2D2 - Connection pool
+Crypto: Ring (general), RustCrypto, Rustls, Sodiumoxide
+Filesystem: Walkdir, Tempfile, Notify (FS notifications)
+
+Aync Progarmming in Rust - "Tokio" project/framework (contains multiple crates/libs)
+
+
+Cargo structure:
+src/ - main source dir
+ - src/lib.rs - library entry point
+ - src/main.rs - main bin entry point
+tests/ - integration tests (use #[test])
+src/bins - additional binaries
+src/examples - example code
+
+
+Tools
+- Rustfmt (catgo fmt)
+- Clippy (cargo clippy)
+- Cargo-audit
+- Cargo-vendor (fetch all libraries you depend on to use them offline)
+- Cargo-bench 
