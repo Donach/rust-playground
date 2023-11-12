@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as Result_Format};
-use std::io;
+use std::fs::File;
+use std::io::{self, Read};
 
 pub struct Csv {
     pub input: Vec<String>,
@@ -36,7 +37,7 @@ impl Display for Csv {
     }
 }
 
-pub fn handle_input() -> Result<Csv, Box<dyn Error>> {
+fn read_input() -> Vec<String> {
     let mut input: Vec<String> = Vec::new();
     println!("Enter text line by line to transmute (or enter 'q' or empty line to quit): ");
     loop {
@@ -57,9 +58,14 @@ pub fn handle_input() -> Result<Csv, Box<dyn Error>> {
             input.push(line);
         }
     }
+    input
+}
+
+pub fn handle_input(input: Vec<String>) -> Result<Csv, Box<dyn Error>> {
+    let mut input: Vec<String> = input;
 
     match input.is_empty() {
-        true => return Err("Invalid input".into()),
+        true => input = read_input(),
         false => (),
     }
     // Build the CSV now
@@ -97,8 +103,27 @@ pub fn handle_input() -> Result<Csv, Box<dyn Error>> {
     for e in longest_elements {
         csv.longest_elements.push(e);
     }
-    //println!("{}", format!("{}", csv));
     Ok(csv)
 
-    //todo!()
+}
+
+pub fn handle_file(filename: String) -> Result<Csv, Box<dyn Error>> {
+    println!("File: {}", filename);
+    let mut file = match File::open(filename) {
+        Ok(file) => file,
+        Err(error) => {
+            println!("Failed to open file: {}", error);
+            return Err(Box::new(error));
+        }
+    };
+
+    let mut input: String = String::new();
+    match file.read_to_string(&mut input) {
+        Ok(_) => (),
+        Err(error) => {
+            eprintln!("Failed to read file: {}", error);
+        }
+    }
+
+    handle_input(vec!(input))
 }

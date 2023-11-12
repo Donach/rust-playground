@@ -1,6 +1,6 @@
 use std::env;
 mod input_handler;
-use input_handler::handle_str_input;
+use input_handler::handle_vec_input;
 
 use crate::main_multi::start_multithreaded;
 mod csv_wrapper;
@@ -12,9 +12,7 @@ fn main() {
     if args.len() <= 1 {
         // Interactive multithreaded mode
         let _ = start_multithreaded(); //should actually not continue towards the return
-        return
     } else {
-        let _ = handle_str_input(args[1].to_string());
-        return
+        let _ = handle_vec_input(args[1..].to_vec());
     }
 }

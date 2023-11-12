@@ -1,47 +1,67 @@
-use std::{error::Error, io};
+use std::error::Error;
 use std::thread::{self, JoinHandle};
 
-use crate::input_handler::{await_input, handle_str_input};
+use flume::Sender;
 
-pub static INTERACTIVE_MODE_ACTIVE: bool = false;
-static INTERACTIVE_CONTINUE: bool = true;
+use crate::input_handler::{await_input, handle_vec_input};
 
-
-fn process_input() -> Result<Vec<String>, Box<dyn Error>> {
-    println!("Enter operation to perform:");
+fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>> {
+    println!("Enter operation to perform followed by text to transmute:");
     let input = await_input()?;
-    handle_str_input(input)
+
+    let (left, right) = match input.splitn(2, ' ').collect::<Vec<&str>>().as_slice() {
+        [left, right] => (*left, *right),
+        _ => ("", ""),
+    };
+    let input_parsed = vec![left.to_string(), right.to_string()];
+    println!("{:?}", &input_parsed);
+    match input_parsed[0].is_empty() {
+        false => {
+            tx.send(input_parsed).unwrap();
+            process_input(tx) // Recursive call
+        }
+        true => {
+            tx.send(input_parsed).unwrap();
+            Ok(vec!["Done".to_string()])
+        }
+    }
 }
 
 fn start_input_thread(tx: flume::Sender<Vec<String>>) -> JoinHandle<()> {
-    let t = thread::spawn(move || {
-        let message = "Hello from spawned thread!";
-        let input = await_input();
-        let result = handle_str_input(input.unwrap());
-        println!("{:?}", result);
-        match result {
-            Ok(res) => tx.send(res).unwrap(),
-            Err(err) => tx.send(vec!["Error: Invalid input".to_string()]).unwrap(),
-        }
-        println!("Message sent.");
-    });
-    t
+    thread::spawn(move || {
+        println!("Starting process input thread.");
+        let _ = process_input(tx);
+    })
 }
 
-fn process_message(tx: flume::Sender<Vec<String>>, rx: flume::Receiver<Vec<String>>) {
-    
-    let t = start_input_thread(tx);
-    t.join().unwrap();
-    let received_message = rx.recv().unwrap();
-    println!("Received: {:?}", &received_message);
-    
+fn process_message(rx: flume::Receiver<Vec<String>>) {
+    let message = rx.recv();
+    match &message {
+        Ok(res) => {
+            println!("Received: {:?}", res);
+            let _ = handle_vec_input(message.unwrap());
+            process_message(rx) // Recursive call
+        }
+        Err(err) => {
+            eprintln!("Error: {:?}", err);
+        }
+    };
+}
+
+fn start_process_message_thread(rx: flume::Receiver<Vec<String>>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        println!("Starting process message thread.");
+        process_message(rx);
+    })
 }
 
 pub fn start_multithreaded() -> Result<Vec<String>, Box<dyn Error>> {
     println!("Starting interactive mode...");
     let (tx, rx) = flume::unbounded();
-    process_message(tx, rx);
+    let t_input = start_input_thread(tx);
 
-
-    todo!()
+    let _t_process_input = start_process_message_thread(rx);
+    //t_process_input.join().unwrap();
+    t_input.join().unwrap();
+    Ok(vec![])
 }
