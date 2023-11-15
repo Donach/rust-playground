@@ -1,0 +1,65 @@
+Sockets
+- enpoint for sending or receiving data 
+(Address, port)
+
+Protocols
+- defined rules for communication
+
+TCP
+- reliable communication Protocols
+- ensures data order and integrity
+- connection-oriented
+- sides "care" about each other
+- all data will be delivered safely
+- Tools:
+    std::net::TcpListener
+        - binds to an address & listens
+    std::net::TcpStream
+        - represents a client-server connection
+
+
+UDP
+- connectionless Protocol
+- essentially fire-and-forget
+- faster but less reliable than TCP
+- does not guarantee data order or integrity
+- sides dont "care"
+- datagram-oriented
+- main tools:
+    std::net:UdpSocket
+
+
+(De-)Serialization
+- transforming data for storage or transmission
+- reconstructing data from stored or transmitted format
+- essential for networking: communicate structured data
+- enable data exchange across system
+- convert complex structures to byte streams
+- ensure data integrity and consistency
+
+Formats
+- Binary
+    compact, efficient
+    not human-readable
+    protobuf, MessagePack, CBOR
+
+- Text
+    Readable, widespread
+    not as efficient
+    JSON, TOML, YAML, RON (Rust-like JSON = Rusty Object Notation)
+
+Libraries
+- serde, bincode, serde_json
+- Serde is the main framework for ser/defined
+    prety much universal
+    robust, efficient, customizable
+- Serde itself does not know any formats, support added by other crates
+
+
+
+HW:
+Designing a simple chat Protocol
+- messaging with different data types
+    Text, Image, File
+- Utilizing Serde and TcpStream
+- We will use an enum -> diverse message types in one structure
