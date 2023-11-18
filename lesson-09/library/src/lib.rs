@@ -9,10 +9,10 @@ pub enum MessageType {
 }
 
 pub fn serialize_message(message: &MessageType) -> String {
-    serde_json::to_string(&message).unwrap()
+    serde_json::to_string(message).unwrap()
 }
 
 pub fn deserialize_message(data: &[u8]) -> MessageType {
-    serde_json::from_slice(&data)
+    serde_json::from_slice(data)
         .expect("Failed to deserialize message")
 }

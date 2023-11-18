@@ -1,28 +1,18 @@
 use std::{
     error::Error,
-    io::{self, Write},
+    fs::File,
+    io::{self, Read, Write},
+    path::Path,
 };
 
 use library::MessageType;
-use image::codecs::png::PngEncoder;
-use image::io::Reader as ImageReader;
-
-use crate::csv_wrapper::{handle_file_to_string};
-
-const OPERATIONS: [&str; 4] = [
-    ".file",
-    ".image",
-    ".quit",
-    "<any> for regular text",
-];
 
 #[derive(Debug)]
 pub enum Operation {
     NoCommand,
-    Invalid,
     File,
     Image,
-    Quit
+    Quit,
 }
 impl From<&str> for Operation {
     fn from(value: &str) -> Self {
@@ -51,6 +41,41 @@ impl From<&str> for Operation {
     }
 }
 
+fn read_file_to_bytes(filename: &String) -> Result<Vec<u8>, Box<dyn Error>> {
+    println!("File: {}", filename);
+    let mut file = match File::open(filename) {
+        Ok(file) => file,
+        Err(error) => {
+            println!("Failed to open file: {}", error);
+            return Err(Box::new(error));
+        }
+    };
+
+    let mut input: Vec<u8> = Vec::new();
+    let _ = match file.read_to_end(&mut input) {
+        Ok(_) => Ok(&input),
+        Err(error) => {
+            eprintln!("Failed to read file: {}", error);
+            Err(Box::new(error))
+        }
+    };
+    Ok(input)
+}
+
+fn get_file_as_messagetype(filename: String) -> Result<MessageType, Box<dyn Error>> {
+    let input = read_file_to_bytes(&filename)?;
+    let path = Path::new(filename.as_str());
+    Ok(MessageType::File(
+        path.file_name().unwrap().to_str().unwrap().to_string(),
+        input,
+    ))
+}
+
+fn get_image_as_messagetype(filename: String) -> Result<MessageType, Box<dyn Error>> {
+    let input = read_file_to_bytes(&filename)?;
+    Ok(MessageType::Image(input))
+}
+
 fn handle_text(input: &str) -> Result<MessageType, Box<dyn Error>> {
     Ok(MessageType::Text(input.to_string()))
 }
@@ -58,46 +83,40 @@ fn handle_text(input: &str) -> Result<MessageType, Box<dyn Error>> {
 fn handle_file(input: &str) -> Result<MessageType, Box<dyn Error>> {
     let (_left, right) = match input.splitn(2, ' ').collect::<Vec<&str>>().as_slice() {
         [left, right] => (*left, *right),
-        _ => {eprintln!("Error: Invalid input"); ("", "")},
+        _ => {
+            eprintln!("Error: Invalid input");
+            ("", "")
+        }
     };
-    handle_file_to_string(right.to_string())
+    get_file_as_messagetype(right.to_string())
 }
 
 fn handle_image(input: &str) -> Result<MessageType, Box<dyn Error>> {
     let (_left, right) = match input.splitn(2, ' ').collect::<Vec<&str>>().as_slice() {
         [left, right] => (*left, *right),
-        _ => {eprintln!("Error: Invalid input"); ("", "")},
-    };
-    let mut bytes: Vec<u8> = Vec::new();
-    let img = ImageReader::open(right)?.decode()?;
-    match img.write_with_encoder(PngEncoder::new(&mut bytes)) {
-        Ok(_res) => {
-            Ok(MessageType::Image(bytes))
-        },
-        Err(err) => {
-            eprintln!("Error: Cannot encode image to PNG {:?}", err);
-            Ok(MessageType::Empty)
+        _ => {
+            eprintln!("Error: Invalid input");
+            ("", "")
         }
-    }
+    };
+    get_image_as_messagetype(right.to_string())
 }
 
 fn handle_operation(operation: &Operation, input: &str) -> Result<MessageType, Box<dyn Error>> {
     match operation {
         Operation::File => handle_file(input),
         Operation::Image => handle_image(input),
-        Operation::Quit => Err("Exiting...".into()),
+        Operation::Quit => Err(".quit".into()),
         Operation::NoCommand => handle_text(input),
-        _ => panic!("Invalid operation!"),
     }
 }
 
 pub fn await_input() -> Result<String, Box<dyn Error>> {
-    print!("Enter text to transmute: ");
     let mut input = String::new();
     match io::stdin().read_line(&mut input) {
         Ok(_res) => {
             if input == "q" || input.is_empty() {
-                Err("Exiting...".into())
+                Err(".quit".into())
             } else {
                 return Ok(input.trim().to_string());
             }
@@ -110,9 +129,7 @@ fn handle_input(operation: &Operation, input: &String) -> Result<MessageType, Bo
     io::stdout().flush().unwrap();
 
     let result = match &operation {
-        Operation::NoCommand => {
-            handle_operation(operation, input)
-        }
+        Operation::NoCommand => handle_operation(operation, input),
         _ => {
             let input = if input.is_empty() {
                 await_input()?
@@ -123,17 +140,9 @@ fn handle_input(operation: &Operation, input: &String) -> Result<MessageType, Bo
         }
     };
 
-    match &result {
-        Ok(output) => {
-            println!(
-                "Success - operation '{:?}'",
-                operation
-            );
-        }
-        Err(err) => {
-            eprintln!("Error: {}", err);
-        }
-    };
+    if let Ok(_output) = &result {
+        println!("Success - operation '{:?}'", operation);
+    }
     result
 }
 

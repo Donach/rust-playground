@@ -1,9 +1,7 @@
-use library::{serialize_message, MessageType};
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::{env, io::Write, net::TcpStream, str::FromStr};
+use std::env;
 
 use crate::main_multi::start_multithreaded;
-mod csv_wrapper;
 mod main_multi;
 mod input_handler;
 fn main() {
@@ -41,21 +39,7 @@ fn main() {
     }
 
     let addr = SocketAddrV4::new(hostname.unwrap(), port.to_owned().unwrap());
-    let message = MessageType::Text("Hello, server2!".to_string());
 
-    //send_message(&addr.to_string(), &message);
-    start_multithreaded(addr);
+    let _ = start_multithreaded(addr);
 }
 
-
-fn send_message(address: &str, message: &MessageType) {
-    let ser_message = serialize_message(&message);
-    let mut stream = TcpStream::connect(address).unwrap();
-    println!("Sending message: {}", ser_message);
-    // Send the length of the serialized message (as 4-byte value).
-    let len = ser_message.len() as u32;
-    stream.write(&len.to_be_bytes()).unwrap();
-
-    // Send the serialized message.
-    stream.write_all(ser_message.as_bytes()).unwrap();
-}

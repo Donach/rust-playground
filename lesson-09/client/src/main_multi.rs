@@ -4,12 +4,12 @@ use std::net::{TcpStream, SocketAddrV4};
 use std::thread::{self, JoinHandle};
 
 use flume::Sender;
-use library::{MessageType, serialize_message};
+use library::serialize_message;
 
-use crate::input_handler::{await_input, handle_vec_input, Operation};
+use crate::input_handler::{await_input, handle_vec_input};
 
 fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>> {
-    println!("Enter operation to perform followed by text to transmute:");
+    println!("Enter operation to perform: ");
     let input = await_input()?;
 
     let (left, right) = match input.splitn(2, ' ').collect::<Vec<&str>>().as_slice() {
@@ -22,7 +22,7 @@ fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>>
         _ => vec![left.to_string(), right.to_string()],
     };
     println!("{:?}", &input_parsed);
-    match input_parsed[0].is_empty() {
+    match input_parsed[0].is_empty() || input_parsed[0] == ".quit" {
         false => {
             tx.send(input_parsed).unwrap();
             process_input(tx) // Recursive call
@@ -44,7 +44,7 @@ fn start_input_thread(tx: flume::Sender<Vec<String>>) -> JoinHandle<()> {
 fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
     let message = rx.recv();
     match &message {
-        Ok(res) => {
+        Ok(_res) => {
             //println!("Received: {:?}", res);
             // Decode the message sent for the Operation type
             let message = message.unwrap();
@@ -53,11 +53,10 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
             match &result {
                 Err(e) => {
                     eprintln!("Exitting... {:?}", e);
-                    return
                 }
                 _ => {
                     send_message(address, serialize_message(&result.unwrap()));
-                    process_message(rx, &address)
+                    process_message(rx, address)
                 } // Recursive call}
             }
         }
@@ -77,14 +76,19 @@ fn start_process_message_thread(rx: flume::Receiver<Vec<String>>, address: Socke
 
 fn send_message(address: &str, ser_message: String) {
     //let serialized = serialize_message(message);
-    let mut stream = TcpStream::connect(address).unwrap();
-    //println!("Sending message: {}", ser_message);
-    // Send the length of the serialized message (as 4-byte value).
-    let len = ser_message.len() as u32;
-    stream.write(&len.to_be_bytes()).unwrap();
+    if let Ok(mut stream) = TcpStream::connect(address) {
+        //println!("Sending message: {}", ser_message);
+        // Send the length of the serialized message (as 4-byte value).
+        println!("Sending data to server...");
+        let len = ser_message.len() as u32;
+        stream.write_all(&len.to_be_bytes()).unwrap();
+    
+        // Send the serialized message.
+        stream.write_all(ser_message.as_bytes()).unwrap();
 
-    // Send the serialized message.
-    stream.write_all(ser_message.as_bytes()).unwrap();
+    }else {
+        eprintln!("Could not connect to server.");
+    }
 }
 
 
