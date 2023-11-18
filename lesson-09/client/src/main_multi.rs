@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::io::Write;
-use std::net::{TcpStream, SocketAddrV4};
+use std::net::{SocketAddrV4, TcpStream};
 use std::thread::{self, JoinHandle};
 
 use flume::Sender;
@@ -66,13 +66,15 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
     };
 }
 
-fn start_process_message_thread(rx: flume::Receiver<Vec<String>>, address: SocketAddrV4) -> JoinHandle<()> {
+fn start_process_message_thread(
+    rx: flume::Receiver<Vec<String>>,
+    address: SocketAddrV4,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         println!("Starting process message thread.");
         process_message(rx, address.to_string().as_str());
     })
 }
-
 
 fn send_message(address: &str, ser_message: String) {
     //let serialized = serialize_message(message);
@@ -82,15 +84,13 @@ fn send_message(address: &str, ser_message: String) {
         println!("Sending data to server...");
         let len = ser_message.len() as u32;
         stream.write_all(&len.to_be_bytes()).unwrap();
-    
+
         // Send the serialized message.
         stream.write_all(ser_message.as_bytes()).unwrap();
-
-    }else {
+    } else {
         eprintln!("Could not connect to server.");
     }
 }
-
 
 pub fn start_multithreaded(address: SocketAddrV4) -> Result<Vec<String>, Box<dyn Error>> {
     println!("Starting interactive mode...");

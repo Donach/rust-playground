@@ -1,9 +1,9 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
 use std::env;
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use crate::main_multi::start_multithreaded;
-mod main_multi;
 mod input_handler;
+mod main_multi;
 fn main() {
     let args: Vec<String> = env::args().collect();
     // Evaluate args
@@ -42,4 +42,3 @@ fn main() {
 
     let _ = start_multithreaded(addr);
 }
-
