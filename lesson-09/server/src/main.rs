@@ -1,16 +1,20 @@
-use std::collections::HashMap;
-use std::{env, fs};
-use std::fs::File;
-use std::net::{TcpListener, TcpStream, SocketAddr};
-use std::io::{prelude::*, self, Cursor};
-use std::time::{SystemTime, UNIX_EPOCH};
 use library::{deserialize_message, MessageType};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, prelude::*, Cursor};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, fs};
 
 use image::codecs::png::PngEncoder;
 use image::io::Reader as ImageReader;
 
 fn write_file(message: &MessageType, file: &[u8], file_name: &str) {
-    let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().to_string();
+    let current_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
     let mut path = env::current_dir().unwrap();
     path.push("files");
     let _create_dir_all = fs::create_dir_all(&path);
@@ -22,19 +26,33 @@ fn write_file(message: &MessageType, file: &[u8], file_name: &str) {
 
     if let Ok(mut tgt_file) = File::create(&path) {
         tgt_file.write_all(file).unwrap();
-        println!("Received file {} written to: {:?}", String::from(file_name) + ".png", path);
+        println!(
+            "Received file {} written to: {:?}",
+            String::from(file_name) + ".png",
+            path
+        );
     } else {
-        println!("Failed to open target path: {}", path.as_os_str().to_os_string().to_str().unwrap());
+        println!(
+            "Failed to open target path: {}",
+            path.as_os_str().to_os_string().to_str().unwrap()
+        );
     };
 }
 
-fn write_image(_message: &MessageType, file: &[u8]) -> Result<MessageType, Box<dyn std::error::Error>> {
-    let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().to_string();
+fn write_image(
+    _message: &MessageType,
+    file: &[u8],
+) -> Result<MessageType, Box<dyn std::error::Error>> {
+    let current_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
     let mut path = env::current_dir().unwrap();
     path.push("files");
     let _create_dir_all = fs::create_dir_all(&path);
     path.push(String::from(&current_timestamp) + ".png");
-    
+
     let mut bytes: Vec<u8> = Vec::new();
     //let img = BufReader::new(file);
     let data = Cursor::new(file);
@@ -46,31 +64,30 @@ fn write_image(_message: &MessageType, file: &[u8]) -> Result<MessageType, Box<d
         Ok(_res) => {
             if let Ok(mut tgt_file) = File::create(&path) {
                 tgt_file.write_all(&bytes).unwrap();
-                println!("Received image {} written to: {:?}", current_timestamp + ".png", path);
+                println!(
+                    "Received image {} written to: {:?}",
+                    current_timestamp + ".png",
+                    path
+                );
             } else {
-                println!("Failed to open target path: {}", path.as_os_str().to_os_string().to_str().unwrap());
+                println!(
+                    "Failed to open target path: {}",
+                    path.as_os_str().to_os_string().to_str().unwrap()
+                );
             };
             Ok(MessageType::Image(bytes))
-        },
+        }
         Err(err) => {
             eprintln!("Error: Cannot encode image to PNG {:?}", err);
             Ok(MessageType::Empty)
         }
     }
-/* 
-    let mut bytes: Vec<u8> = Vec::new();
-    let img = ImageReader::open(right)?.decode()?;
-    match img.write_with_encoder(PngEncoder::new(&mut bytes)) {
-        Ok(_res) => Ok(MessageType::Image(bytes)),
-        Err(err) => {
-            eprintln!("Error: Cannot encode image to PNG {:?}", err);
-            Ok(MessageType::Empty)
-        }
-    }*/
 }
 
-
-fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStream>) -> MessageType {    
+fn handle_client(
+    mut stream: TcpStream,
+    clients: &mut HashMap<SocketAddr, TcpStream>,
+) -> MessageType {
     let addr = stream.peer_addr().unwrap();
     clients.insert(addr, stream.try_clone().unwrap());
 
@@ -95,7 +112,7 @@ fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStr
                 write_file(&message, file, name);
                 message
             }
-            MessageType::Image( file) => {
+            MessageType::Image(file) => {
                 // Write file into files/ dir
                 let _write_image = write_image(&message, file);
                 message
@@ -104,19 +121,18 @@ fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStr
                 println!("Received message: {:?}", message);
                 message
             }
-            MessageType::Empty => {
-                MessageType::Empty
-            }
+            MessageType::Empty => MessageType::Empty,
         }
     } else {
         MessageType::Empty
     }
 }
 
-fn listen_and_accept(address: &str) {
+fn listen_and_accept(address: SocketAddrV4) {
     let listener = TcpListener::bind(address).unwrap();
-    listener.set_nonblocking(true).expect("failed to initiate non-blocking");
-    
+    listener
+        .set_nonblocking(true)
+        .expect("failed to initiate non-blocking");
 
     let mut clients: HashMap<SocketAddr, TcpStream> = HashMap::new();
 
@@ -125,21 +141,52 @@ fn listen_and_accept(address: &str) {
             Ok(s) => {
                 let _message = handle_client(s, &mut clients);
             }
-            Err (e) if e.kind() == io::ErrorKind::WouldBlock => {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 // Wait until socket is ready
                 //std::thread::sleep(std::time::Duration::from_secs(1));
-                
+
                 continue;
             }
-            Err (ee) => panic!("IO error! {}", ee),
+            Err(ee) => panic!("IO error! {}", ee),
         }
     }
 }
 
 fn main() {
-    let hostname = "127.0.0.1";
-    let port = 11111;
-    let addr = format!("{}:{}", hostname, port);
-    
-    listen_and_accept(&addr);
+    let args: Vec<String> = env::args().collect();
+    // Evaluate args
+    println!("{:?}", args);
+    // Validate args for hostname and port
+    let hostname: Result<Ipv4Addr, std::net::AddrParseError>;
+    let port: Result<u16, std::num::ParseIntError>;
+    if args.len() < 3 {
+        println!("Usage: server <hostname> <port>; using default values now...");
+        hostname = "127.0.0.1".parse::<Ipv4Addr>();
+        port = "11111".parse::<u16>();
+    } else {
+        hostname = args[1].parse::<Ipv4Addr>(); //Ipv4Addr::from_str(&args[1]).unwrap();
+        match hostname {
+            Ok(h) => {
+                println!("Parsed hostname: {:?}", h);
+            }
+            Err(e) => {
+                eprintln!("Error parsing hostname: {:?}", e);
+                panic!()
+            }
+        }
+        port = args[2].parse::<u16>();
+        match port {
+            Ok(p) => {
+                println!("Parsed port: {:?}", &p);
+            }
+            Err(e) => {
+                eprintln!("Error parsing port: {:?}", e);
+                panic!()
+            }
+        }
+    }
+
+    let addr = SocketAddrV4::new(hostname.unwrap(), port.to_owned().unwrap());
+
+    listen_and_accept(addr);
 }
