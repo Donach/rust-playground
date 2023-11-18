@@ -3,17 +3,13 @@ use std::{
     io::{self, Write},
 };
 
-use library::{MessageType, serialize_message};
-use slug::slugify;
+use library::MessageType;
+use image::codecs::png::PngEncoder;
+use image::io::Reader as ImageReader;
 
 use crate::csv_wrapper::{handle_file_to_string};
 
-const OPERATIONS: [&str; 9] = [
-    "uppercase",
-    "lowercase",
-    "no-spaces",
-    "slugify",
-    "csv",
+const OPERATIONS: [&str; 4] = [
     ".file",
     ".image",
     ".quit",
@@ -68,7 +64,21 @@ fn handle_file(input: &str) -> Result<MessageType, Box<dyn Error>> {
 }
 
 fn handle_image(input: &str) -> Result<MessageType, Box<dyn Error>> {
-    Ok(MessageType::Text(input.to_string()))
+    let (_left, right) = match input.splitn(2, ' ').collect::<Vec<&str>>().as_slice() {
+        [left, right] => (*left, *right),
+        _ => {eprintln!("Error: Invalid input"); ("", "")},
+    };
+    let mut bytes: Vec<u8> = Vec::new();
+    let img = ImageReader::open(right)?.decode()?;
+    match img.write_with_encoder(PngEncoder::new(&mut bytes)) {
+        Ok(_res) => {
+            Ok(MessageType::Image(bytes))
+        },
+        Err(err) => {
+            eprintln!("Error: Cannot encode image to PNG {:?}", err);
+            Ok(MessageType::Empty)
+        }
+    }
 }
 
 fn handle_operation(operation: &Operation, input: &str) -> Result<MessageType, Box<dyn Error>> {

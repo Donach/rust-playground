@@ -45,7 +45,7 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
     let message = rx.recv();
     match &message {
         Ok(res) => {
-            println!("Received: {:?}", res);
+            //println!("Received: {:?}", res);
             // Decode the message sent for the Operation type
             let message = message.unwrap();
             //let operation = Operation::from(message[0].as_str());
@@ -78,7 +78,7 @@ fn start_process_message_thread(rx: flume::Receiver<Vec<String>>, address: Socke
 fn send_message(address: &str, ser_message: String) {
     //let serialized = serialize_message(message);
     let mut stream = TcpStream::connect(address).unwrap();
-    println!("Sending message: {}", ser_message);
+    //println!("Sending message: {}", ser_message);
     // Send the length of the serialized message (as 4-byte value).
     let len = ser_message.len() as u32;
     stream.write(&len.to_be_bytes()).unwrap();

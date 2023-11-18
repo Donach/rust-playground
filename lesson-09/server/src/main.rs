@@ -4,7 +4,7 @@ use std::fs::File;
 use std::net::{TcpListener, TcpStream, SocketAddr};
 use std::io::{prelude::*, self, empty};
 use std::error::Error;
-
+use std::time::{SystemTime, UNIX_EPOCH};
 use library::{deserialize_message, MessageType};
 
 
@@ -23,7 +23,7 @@ fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStr
     if len > 0 {
         let mut buffer = vec![0u8; len];
         stream.read_exact(&mut buffer).unwrap();
-        println!("Buffer: {:?}", buffer);
+        //println!("Buffer: {:?}", buffer);
 
         let message: MessageType = deserialize_message(&buffer);
         match &message {
@@ -33,7 +33,7 @@ fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStr
                 path.push("files");
                 fs::create_dir_all(&path);
                 path.push(&name);
-                println!("File path: {:?}", path);
+                println!("Received file {} written to: {:?}", name, path);
                 let mut tgt_file = match File::create(path) {
                     Ok(file) => file,
                     Err(error) => {
@@ -45,9 +45,26 @@ fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStr
                 message
             }
             MessageType::Image( file) => {
-                todo!("Implement .image")
+                // Write file into files/ dir
+                let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis().to_string();
+                let mut path = env::current_dir().unwrap();
+                path.push("files");
+                fs::create_dir_all(&path);
+                path.push(String::from(&current_timestamp) + ".png");
+                println!("Received file {} written to: {:?}", current_timestamp + ".png", path);
+
+                let mut tgt_file = match File::create(path) {
+                    Ok(file) => file,
+                    Err(error) => {
+                        println!("Failed to open file: {}", error);
+                        Err(error).unwrap()
+                    }
+                };
+                tgt_file.write_all(&file).unwrap();
+                message
             }
             _ => {
+                println!("Received message: {:?}", message);
                 message
             }
         }
@@ -66,8 +83,8 @@ fn listen_and_accept(address: &str) {
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
-                let message = handle_client(s, &mut clients);
-                println!("{:?}", message);
+                let _message = handle_client(s, &mut clients);
+                //println!("{:?}", message);
             }
             Err (e) if e.kind() == io::ErrorKind::WouldBlock => {
                 // Wait until socket is ready
