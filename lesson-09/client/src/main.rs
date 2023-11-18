@@ -1,19 +1,61 @@
-// HW related
-use lesson_09::MessageType;
+use library::{serialize_message, MessageType};
+use std::net::{Ipv4Addr, SocketAddrV4};
+use std::{env, io::Write, net::TcpStream, str::FromStr};
 
-use std::net::TcpStream;
-use std::io::{Read, Write};
-
+use crate::main_multi::start_multithreaded;
+mod csv_wrapper;
+mod main_multi;
+mod input_handler;
 fn main() {
-    //let my_message = MessageType::Text("Hello world!".to_string());
-    //let my_message = MessageType::Image(vec![0]);
-    let my_message = MessageType::File{name: "Hello".into(), content: "hello".as_bytes().to_vec()};
-    let serialized = my_message.serialize().unwrap();
+    let args: Vec<String> = env::args().collect();
+    // Evaluate args
+    println!("{:?}", args);
+    // Validate args for hostname and port
+    let hostname: Result<Ipv4Addr, std::net::AddrParseError>;
+    let port: Result<u16, std::num::ParseIntError>;
+    if args.len() < 3 {
+        println!("Usage: client <hostname> <port>; using default values now...");
+        hostname = "127.0.0.1".parse::<Ipv4Addr>();
+        port = "11111".parse::<u16>();
+    } else {
+        hostname = args[1].parse::<Ipv4Addr>(); //Ipv4Addr::from_str(&args[1]).unwrap();
+        match hostname {
+            Ok(h) => {
+                println!("Parsed hostname: {:?}", h);
+            }
+            Err(e) => {
+                eprintln!("Error parsing hostname: {:?}", e);
+                panic!()
+            }
+        }
+        port = args[2].parse::<u16>();
+        match port {
+            Ok(p) => {
+                println!("Parsed port: {:?}", &p);
+            }
+            Err(e) => {
+                eprintln!("Error parsing port: {:?}", e);
+                panic!()
+            }
+        }
+    }
 
-    let mut stream = TcpStream::connect("127.0.0.1:11111").unwrap();
+    let addr = SocketAddrV4::new(hostname.unwrap(), port.to_owned().unwrap());
+    let message = MessageType::Text("Hello, server2!".to_string());
 
-    let len = serialized.len() as u32;
+    //send_message(&addr.to_string(), &message);
+    start_multithreaded(addr);
+}
+
+
+fn send_message(address: &str, message: &MessageType) {
+    let ser_message = serialize_message(&message);
+    let mut stream = TcpStream::connect(address).unwrap();
+    println!("Sending message: {}", ser_message);
+    // Send the length of the serialized message (as 4-byte value).
+    let len = ser_message.len() as u32;
     stream.write(&len.to_be_bytes()).unwrap();
 
-    stream.write_all(&serialized).unwrap();
+    // Send the serialized message.
+    stream.write_all(ser_message.as_bytes()).unwrap();
 }

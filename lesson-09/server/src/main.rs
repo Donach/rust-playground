@@ -1,60 +1,94 @@
-use library::MessageType;
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::{env, fs};
+use std::fs::File;
 use std::net::{TcpListener, TcpStream, SocketAddr};
-use std::io;
+use std::io::{prelude::*, self, empty};
+use std::error::Error;
 
-fn main() {
-    let mut listener = TcpListener::bind("127.0.0.1:11111").unwrap();
-    // file:///home/donach/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/share/doc/rust/html/std/net/struct.TcpStream.html#method.set_nonblocking
-    for connection in listener.incoming() {
-        let mut connection = connection.unwrap(); // TODO: Handle errors
-        let mut len_bytes = [0u8; 4];
-        connection.read_exact(&mut len_bytes).unwrap();
+use library::{deserialize_message, MessageType};
 
-        let len = u32::from_be_bytes(len_bytes) as usize;
+
+fn handle_client(mut stream: TcpStream, clients: &mut HashMap<SocketAddr, TcpStream>) -> MessageType {    
+    let addr = stream.peer_addr().unwrap();
+    clients.insert(addr.clone(), stream.try_clone().unwrap());
+
+    let mut len_bytes = [0u8; 4];
+    match stream.read_exact(&mut len_bytes) {
+        Ok(it) => it,
+        Err(err) => return MessageType::Empty,
+    };
+    let len = u32::from_be_bytes(len_bytes) as usize;
+    println!("Len: {}", len);
+
+    if len > 0 {
         let mut buffer = vec![0u8; len];
-        connection.read_exact(&mut buffer).unwrap();
+        stream.read_exact(&mut buffer).unwrap();
+        println!("Buffer: {:?}", buffer);
 
-        let my_message = MessageType::deserialize(&buffer).unwrap();
-
-        println!("Received: {:?}", my_message);
+        let message: MessageType = deserialize_message(&buffer);
+        match &message {
+            MessageType::File(name, file) => {
+                // Write file into files/ dir
+                let mut path = env::current_dir().unwrap();
+                path.push("files");
+                fs::create_dir_all(&path);
+                path.push(&name);
+                println!("File path: {:?}", path);
+                let mut tgt_file = match File::create(path) {
+                    Ok(file) => file,
+                    Err(error) => {
+                        println!("Failed to open file: {}", error);
+                        Err(error).unwrap()
+                    }
+                };
+                tgt_file.write_all(&file).unwrap();
+                message
+            }
+            MessageType::Image( file) => {
+                todo!("Implement .image")
+            }
+            _ => {
+                message
+            }
+        }
+    } else {
+        MessageType::Empty
     }
 }
 
-fn handle_client(mut stream: TcpStream) {
-    let mut buffer = [0; 512];
-    stream.read(&mut buffer).unwrap();
-    println!("Received: {:?}", String::from_utf8_lossy(&buffer[..]));
-}
-
-fn handle_connection(mut stream: TcpStream, address: &str, clients: &mut HashMap<SocketAddr, TcpStream>) {
-    let addr = stream.peer_addr().unwrap();
-    clients.insert(addr.clone(), stream);
-
-    let message = handle_client(clients.get(&addr).unwrap().try_clone().unwrap());
-    // Here you can further process this message as per your requirements
-    println!("{:?}", message);
-}
 fn listen_and_accept(address: &str) {
     let listener = TcpListener::bind(address).unwrap();
+    listener.set_nonblocking(true).expect("failed to initiate non-blocking");
+    
+
     let mut clients: HashMap<SocketAddr, TcpStream> = HashMap::new();
 
-    // Tracking connected clients
     for stream in listener.incoming() {
-        let stream = stream;
-        stream.unwrap().set_nonblocking(true).expect("failed to initiate non-blocking");
         match stream {
             Ok(s) => {
-                handle_connection(s, &address, &mut clients);
-                
+                let message = handle_client(s, &mut clients);
+                println!("{:?}", message);
             }
             Err (e) if e.kind() == io::ErrorKind::WouldBlock => {
                 // Wait until socket is ready
-                //wait_for_fd();
+                // println!("Waiting for socket to be ready...");
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                
                 continue;
             }
             Err (ee) => panic!("IO error! {}", ee),
         }
+
+        // let message = handle_client(stream.unwrap(), &mut clients);
+        // Here, you can further process this message as per your requirements
+        // println!("{:?}", message);
     }
+}
+
+fn main() {
+    let hostname = "127.0.0.1";
+    let port = 11111;
+    let addr = format!("{}:{}", hostname, port);
+    
+    listen_and_accept(&addr);
 }
