@@ -1,0 +1,21 @@
+fn duplucate<T: Copy>(item:t) -> [T; 2] {
+    [item, item]
+}
+
+struct Point<T> {
+    x: T,
+    y: T,
+}
+
+impl<T> Point<T> where T: Clone {
+
+}
+
+impl<T> Point<T> where T: Animal {
+
+}
+
+fn main() {
+    let int_point = Point {x: 5, y: 10};
+    let flt_point = Point {x: 1.0, y: 10.5};
+}
