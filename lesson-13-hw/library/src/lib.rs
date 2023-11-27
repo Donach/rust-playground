@@ -9,6 +9,7 @@ use std::{
 
 #[cfg(not(debug_assertions))]
 use ::anyhow as eyre;
+
 #[cfg(debug_assertions)]
 use color_eyre::eyre;
 use image::{codecs::png::PngEncoder, io::Reader as ImageReader, ImageError};
@@ -47,7 +48,7 @@ pub enum MessageType {
     Text(String),
     Image(Vec<u8>),
     File(String, Vec<u8>), // Filename and its content as bytes
-    Empty,
+    Error(String),
 }
 
 pub fn serialize_message(message: &MessageType) -> Result<String, crate::DataProcessingError> {
@@ -117,7 +118,7 @@ pub fn read_from_stream(mut stream: TcpStream) -> (TcpStream, MessageType) {
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes) {
         Ok(it) => it,
-        Err(err) => return (stream, MessageType::Text(format!("Error: {:?}", err))),
+        Err(err) => return (stream, MessageType::Error(format!("Error: {:?}", err))),
     };
 
     let len = u32::from_be_bytes(len_bytes) as usize;
@@ -126,17 +127,20 @@ pub fn read_from_stream(mut stream: TcpStream) -> (TcpStream, MessageType) {
         let mut buffer = vec![0u8; len];
         match stream.read_exact(&mut buffer) {
             Ok(it) => it,
-            Err(err) => return (stream, MessageType::Text(format!("Error: {:?}", err))),
+            Err(err) => return (stream, MessageType::Error(format!("Error: {:?}", err))),
         };
 
         let message = match deserialize_message(&buffer) {
             Ok(it) => it,
-            Err(err) => MessageType::Text(format!("Error: {:?}", err)),
+            Err(err) => MessageType::Error(format!("Error: {:?}", err)),
         };
 
         (stream, message)
     } else {
-        (stream, MessageType::Text(format!("Error: received no data !")))
+        (
+            stream,
+            MessageType::Error(format!("Error: received no data !")),
+        )
     }
 }
 
@@ -152,7 +156,11 @@ pub fn write_to_stream(
     stream.write_all(&len.to_be_bytes()).unwrap();
 
     // Send the serialized message.
-    stream.write_all(ser_message.as_bytes()).unwrap();
+    let s = stream.write_all(ser_message.as_bytes());
+    match s {
+        Ok(it) => it,
+        Err(err) => return Err(DataProcessingError::Io(err)),
+    };
 
     log::info!("Transfer complete!");
     Ok(stream)
@@ -187,7 +195,7 @@ pub fn handle_stream_message(message: MessageType) -> MessageType {
             log::info!("Received message: {:?}", &message);
             message
         }
-        MessageType::Empty => MessageType::Text("Error: Received empty message!".to_string()),
+        MessageType::Error(e) => MessageType::Error(format!("Error: {}", e)),
     }
 }
 

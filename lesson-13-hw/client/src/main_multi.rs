@@ -5,7 +5,7 @@ use std::thread::{self};
 
 use anyhow::Context;
 use flume::Sender;
-use library::{await_input, read_from_stream, write_to_stream, MessageType, handle_stream_message};
+use library::{await_input, handle_stream_message, read_from_stream, write_to_stream, MessageType};
 use log;
 
 use crate::input_handler::handle_vec_input;
@@ -61,12 +61,12 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
                     Err(e) => {
                         log::error!("Error: {:?}", e);
                     }
-                    Ok(stream) => {
+                    Ok(_stream) => {
                         // Read response from server
-                        log::trace!("Awaiting response...");
-                        let (_, msg) = read_from_stream(stream);
+                        log::trace!("Data sent!");
+                        /* let (_, msg) = read_from_stream(stream);
                         match msg {
-                            MessageType::Empty
+                            MessageType::Error(_)
                             | MessageType::Image(_)
                             | MessageType::File(_, _) => {
                                 log::info!("Invalid response - expected Text response.");
@@ -74,7 +74,7 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
                             MessageType::Text(text) => {
                                 log::info!("Response: {}", text);
                             }
-                        };
+                        }; */
                     }
                 }
             } else {
@@ -83,27 +83,31 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
 
             // Lastly, continue recursively waiting for new user input
             process_message(rx, address); // Recursive call
-                
         }
-        
     }
 }
 
 fn receive_message(stream: TcpStream) {
     if let Ok(stream) = stream.try_clone() {
         let (stream, msg) = read_from_stream(stream);
-        handle_stream_message(msg); 
-        receive_message(stream);
+        match msg {
+            MessageType::Error(_e) => {
+                log::error!("Server disconnected.");
+            }
+            _ => {
+                handle_stream_message(msg);
+                receive_message(stream);
+            }
+        }
     } else {
         log::error!("Server disconnected.");
     }
 }
 
-
 pub fn start_multithreaded(address: SocketAddrV4) -> Result<Vec<String>, Box<dyn Error>> {
     log::info!("Starting interactive mode...");
-    let mut stream = TcpStream::connect(address).context("Failed to connect to server");
-     
+    let stream = TcpStream::connect(address).context("Failed to connect to server");
+
     let stream_clone = match stream {
         Ok(stream) => stream.try_clone().context("Stream clone failed"),
         Err(err) => {
@@ -135,7 +139,7 @@ pub fn start_multithreaded(address: SocketAddrV4) -> Result<Vec<String>, Box<dyn
                 receive_message(stream_clone);
             });
             t_input.join().unwrap();
-        },
+        }
     };
     Ok(vec![])
 }

@@ -1,6 +1,6 @@
 use std::{error::Error, fs::File, io::Read, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use library::MessageType;
 use log;
 

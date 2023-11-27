@@ -1,22 +1,40 @@
-use library::{get_addr, handle_stream_message, read_from_stream, write_to_stream};
+use library::{get_addr, read_from_stream, write_to_stream};
+use std::collections::HashMap;
 //use std::collections::HashMap;
 use std::io::{self};
-use std::net::{/*SocketAddr, */ SocketAddrV4, TcpListener, TcpStream};
+use std::net::{SocketAddr, /*SocketAddr, */ SocketAddrV4, TcpListener, TcpStream};
 
-use std::{env, thread};
-use std::sync::{Arc, Mutex};
 use simple_logger;
+use std::sync::{Arc, Mutex};
+use std::{env, thread};
 
 //static mut clients: HashMap<SocketAddr, TcpStream> = HashMap::new();
 
-fn handle_client(stream: TcpStream) {
-    //let addr = stream.peer_addr().unwrap();
-    //clients.insert(addr, stream.try_clone().unwrap());
+fn handle_client(sender_stream: TcpStream, clients: Arc<Mutex<HashMap<SocketAddr, TcpStream>>>) {
+    let sender_stream = match sender_stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => {
+            log::error!("Failed to clone stream");
+            return;
+            //break;
+        }
+    };
+    let (sender_stream, msg_type) = read_from_stream(sender_stream);
 
-    let (stream, msg_type) = read_from_stream(stream);
-    let response = handle_stream_message(msg_type);
-    // Send reponse back to client
-    let _ = write_to_stream(stream, &response);
+    let mut clients = clients.lock().unwrap();
+    // Remove disconnected clients and Send reponse to all clients
+    clients.retain(|&addr, stream| {
+        if addr != sender_stream.peer_addr().unwrap() {
+            let stream = stream.try_clone().unwrap();
+            let result = write_to_stream(stream, &msg_type);
+            match result {
+                Ok(_) => true,
+                Err(_e) => false,
+            }
+        } else {
+            true
+        }
+    });
 }
 
 fn listen_and_accept(address: SocketAddrV4) {
@@ -25,13 +43,24 @@ fn listen_and_accept(address: SocketAddrV4) {
         .set_nonblocking(true)
         .expect("failed to initiate non-blocking");
 
+    //let (tx, rx) = mpsc::channel();
     //let rx = Arc::new(Mutex::new(rx));
+    let clients: Arc<Mutex<HashMap<SocketAddr, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
 
     for stream in listener.incoming() {
         match stream {
-            Ok(s) => {
+            Ok(stream) => {
+                let addr: SocketAddr = stream.peer_addr().unwrap();
+                clients
+                    .lock()
+                    .unwrap()
+                    .insert(addr, stream.try_clone().unwrap());
+
+                //let tx = tx.clone();
+                //let rx = Arc::clone(&rx);
+                let clients = clients.clone();
                 let _t = thread::spawn(|| {
-                    handle_client(s);
+                    handle_client(stream, clients);
                 });
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
