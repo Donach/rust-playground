@@ -1,5 +1,6 @@
 use std::{error::Error, fs::File, io::Read, path::Path};
 
+use anyhow::{Context, Result};
 use library::MessageType;
 use log;
 
@@ -14,23 +15,23 @@ impl From<&str> for Operation {
     fn from(value: &str) -> Self {
         return match value.to_lowercase().trim() {
             ".file" => {
-                log::info!("Operation: File");
+                log::trace!("Operation: File");
                 Operation::File
             }
             ".image" => {
-                log::info!("Operation: Image");
+                log::trace!("Operation: Image");
                 Operation::Image
             }
             ".quit" => {
-                log::info!("Operation: Quit");
+                log::trace!("Operation: Quit");
                 Operation::Quit
             }
-            "" => {
-                log::info!("Operation: Quit");
+            ".q" => {
+                log::trace!("Operation: Quit");
                 Operation::Quit
             }
             _ => {
-                log::info!("Operation: Text");
+                log::trace!("Operation: Text");
                 Operation::Text
             }
         };
@@ -102,7 +103,7 @@ fn handle_operation(operation: &Operation, input: &str) -> Result<MessageType, B
     match operation {
         Operation::File => handle_file(input),
         Operation::Image => handle_image(input),
-        Operation::Quit => Err(".quit".into()),
+        Operation::Quit => Err("Exitting...".into()),
         Operation::Text => handle_text(input),
     }
 }

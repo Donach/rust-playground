@@ -4,7 +4,7 @@ use std::io::{self};
 use std::net::{/*SocketAddr, */ SocketAddrV4, TcpListener, TcpStream};
 
 use std::{env, thread};
-
+use std::sync::{Arc, Mutex};
 use simple_logger;
 
 //static mut clients: HashMap<SocketAddr, TcpStream> = HashMap::new();
@@ -25,10 +25,12 @@ fn listen_and_accept(address: SocketAddrV4) {
         .set_nonblocking(true)
         .expect("failed to initiate non-blocking");
 
+    //let rx = Arc::new(Mutex::new(rx));
+
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
-                let t = thread::spawn(|| {
+                let _t = thread::spawn(|| {
                     handle_client(s);
                 });
             }

@@ -1,14 +1,16 @@
 use std::error::Error;
-use std::io::Write;
-use std::net::{SocketAddrV4, TcpStream};
-use std::thread::{self, JoinHandle};
 
+use std::net::{SocketAddrV4, TcpStream};
+use std::thread::{self};
+
+use anyhow::Context;
 use flume::Sender;
-use library::{await_input, serialize_message, MessageType, DataProcessingError, ConnectionError, write_to_stream, read_from_stream};
+use library::{await_input, read_from_stream, write_to_stream, MessageType, handle_stream_message};
 use log;
 
 use crate::input_handler::handle_vec_input;
 
+// Currently can process only single line of text, known limitation
 fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>> {
     println!("Enter operation to perform: ");
     let input = await_input()?;
@@ -23,104 +25,117 @@ fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>>
         _ => vec![left.to_string(), right.to_string()],
     };
     //println!("{:?}", &input_parsed);
-    match input_parsed[0].is_empty() || input_parsed[0] == ".quit" {
-        false => {
-            tx.send(input_parsed).unwrap();
-            process_input(tx) // Recursive call
-        }
+    match input_parsed[0] == ".quit" || input_parsed[0] == ".q" {
         true => {
             tx.send(input_parsed).unwrap();
-            Ok(vec!["Done".to_string()])
+            Ok(vec!["Exitting...".to_string()])
+        }
+        false => {
+            if input_parsed[0].len() > 0 {
+                tx.send(input_parsed).unwrap();
+            }
+            process_input(tx) // Recursive call
         }
     }
 }
 
-fn start_input_thread(tx: flume::Sender<Vec<String>>) -> JoinHandle<()> {
-    thread::spawn(move || {
-        //log::info!("Starting process input thread.");
-        let _ = process_input(tx);
-    })
-}
-
-fn process_message(rx: flume::Receiver<Vec<String>>, address: &str){
-    let message = rx.recv();
-    match &message {
-        Ok(_res) => {
-            let message = message.unwrap();
-            let result = handle_vec_input(message);
-            match &result {
-                Err(_e) => {
-                    log::info!("Exitting...");
-                }
-                _ => {
-                    if let Ok(stream) = TcpStream::connect(address) {
-                        log::info!("Sending data to server...");
-                        match write_to_stream(stream, &result.unwrap()) {
-                            Ok(stream) => {
-                                // Read response from server
-                                log::trace!("Awaiting response...");
-                                let (_, msg) = read_from_stream(stream);
-                                match msg {
-                                    MessageType::Text(text) => {
-                                        log::info!("Response: {}", text);
-                                    },
-                                    MessageType::Empty | MessageType::Image(_) | MessageType::File(_, _) => {
-                                        log::info!("Invalid response - expected Text response.");
-                                    }
-                                };
-                            }
-                            Err(e) => {
-                                log::error!("Error: {:?}", e);
-                            }
-                        }
-                    } else {
-                        log::error!("Could not connect to server.");
-                    }
-                    process_message(rx, address); // Recursive call
-                }
-            }
-        }
+fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
+    match rx.recv() {
         Err(err) => {
             log::error!("Error: {:?}", err);
         }
-    };
-}
+        Ok(message) => {
+            let result = match handle_vec_input(message) {
+                Err(e) => {
+                    log::info!("{}", e.to_string());
+                    process_message(rx, address);
+                    return;
+                }
+                Ok(result) => result,
+            };
 
-fn start_process_message_thread(
-    rx: flume::Receiver<Vec<String>>,
-    address: SocketAddrV4,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
-        //log::info!("Starting process message thread.");
-        process_message(rx, address.to_string().as_str());
-    })
-}
-// Takes already serialized message in String object
-fn send_message(address: &str, ser_message: String) -> Result<TcpStream, ConnectionError> {
-    if let Ok(mut stream) = TcpStream::connect(address) {
-        // Send the length of the serialized message (as 4-byte value).
-        let len = ser_message.len() as u32;
-        stream.write_all(&len.to_be_bytes()).unwrap();
+            // If input is parsed correctly, let's connect to server and send some data there
+            if let Ok(stream) = TcpStream::connect(address) {
+                log::info!("Sending data to server...");
+                match write_to_stream(stream, &result) {
+                    Err(e) => {
+                        log::error!("Error: {:?}", e);
+                    }
+                    Ok(stream) => {
+                        // Read response from server
+                        log::trace!("Awaiting response...");
+                        let (_, msg) = read_from_stream(stream);
+                        match msg {
+                            MessageType::Empty
+                            | MessageType::Image(_)
+                            | MessageType::File(_, _) => {
+                                log::info!("Invalid response - expected Text response.");
+                            }
+                            MessageType::Text(text) => {
+                                log::info!("Response: {}", text);
+                            }
+                        };
+                    }
+                }
+            } else {
+                log::error!("Could not connect to server.");
+            }
 
-        // Send the serialized message.
-        stream.write_all(ser_message.as_bytes()).unwrap();
-
-        log::info!("Transfer complete!");
-        // Read response from server
-        Ok(stream)
-    } else {
-        log::error!("Could not connect to server.");
-        Err(ConnectionError::ServerNotFound(address.to_string()))
+            // Lastly, continue recursively waiting for new user input
+            process_message(rx, address); // Recursive call
+                
+        }
+        
     }
 }
 
+fn receive_message(stream: TcpStream) {
+    if let Ok(stream) = stream.try_clone() {
+        let (stream, msg) = read_from_stream(stream);
+        handle_stream_message(msg); 
+        receive_message(stream);
+    } else {
+        log::error!("Server disconnected.");
+    }
+}
+
+
 pub fn start_multithreaded(address: SocketAddrV4) -> Result<Vec<String>, Box<dyn Error>> {
     log::info!("Starting interactive mode...");
-    let (tx, rx) = flume::unbounded();
-    // Thread for reading from stdin
-    let t_input = start_input_thread(tx);
-    // Thread that processes stdin and submits data to server
-    let _t_process_input = start_process_message_thread(rx, address);
-    t_input.join().unwrap();
+    let mut stream = TcpStream::connect(address).context("Failed to connect to server");
+     
+    let stream_clone = match stream {
+        Ok(stream) => stream.try_clone().context("Stream clone failed"),
+        Err(err) => {
+            log::error!("Error: {:?}", err);
+            Err(err)
+        }
+    };
+
+    match stream_clone {
+        Err(_err) => {
+            log::info!("Exitting...");
+        }
+        Ok(stream_clone) => {
+            let (tx, rx) = flume::unbounded();
+            // Thread for reading from stdin
+            let t_input = thread::spawn(move || {
+                //log::info!("Starting process input thread.");
+                let _ = process_input(tx);
+            });
+            // Thread that processes stdin and submits data to server
+            let _t_process_input = thread::spawn(move || {
+                //log::info!("Starting process message thread.");
+                process_message(rx, address.to_string().as_str());
+            });
+
+            // Thread that reads data from server
+            let _t_read = thread::spawn(move || {
+                //log::info!("Starting process message thread.");
+                receive_message(stream_clone);
+            });
+            t_input.join().unwrap();
+        },
+    };
     Ok(vec![])
 }

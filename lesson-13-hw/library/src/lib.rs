@@ -1,19 +1,22 @@
 use std::{
-    error::Error,
-    io::{self, Read, Write, Cursor},
-    net::{Ipv4Addr, SocketAddrV4, TcpStream}, time::{SystemTime, UNIX_EPOCH}, env, path::PathBuf, fs::{self, File},
+    env,
+    fs::{self, File},
+    io::{self, Cursor, Read, Write},
+    net::{Ipv4Addr, SocketAddrV4, TcpStream},
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(not(debug_assertions))]
 use ::anyhow as eyre;
 #[cfg(debug_assertions)]
 use color_eyre::eyre;
-use image::{ImageError, codecs::png::PngEncoder, io::Reader as ImageReader};
+use image::{codecs::png::PngEncoder, io::Reader as ImageReader, ImageError};
 use log;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use eyre::{anyhow, Context, Result};
+use eyre::Result;
 
 #[derive(Error, Debug)]
 pub enum DataProcessingError {
@@ -114,27 +117,36 @@ pub fn read_from_stream(mut stream: TcpStream) -> (TcpStream, MessageType) {
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes) {
         Ok(it) => it,
-        Err(_err) => return (stream, MessageType::Empty),
+        Err(err) => return (stream, MessageType::Text(format!("Error: {:?}", err))),
     };
-    let len = u32::from_be_bytes(len_bytes) as usize;
-    //println!("Len: {}", len);
 
+    let len = u32::from_be_bytes(len_bytes) as usize;
     if len > 0 {
         log::info!("Receiving data...");
         let mut buffer = vec![0u8; len];
-        stream.read_exact(&mut buffer).unwrap();
-        //println!("Buffer: {:?}", buffer);
+        match stream.read_exact(&mut buffer) {
+            Ok(it) => it,
+            Err(err) => return (stream, MessageType::Text(format!("Error: {:?}", err))),
+        };
 
-        let message = deserialize_message(&buffer);
-        let msg_type = message.unwrap();
-        (stream, msg_type)
+        let message = match deserialize_message(&buffer) {
+            Ok(it) => it,
+            Err(err) => MessageType::Text(format!("Error: {:?}", err)),
+        };
+
+        (stream, message)
     } else {
-        (stream, MessageType::Empty)
+        (stream, MessageType::Text(format!("Error: received no data !")))
     }
 }
 
-pub fn write_to_stream(mut stream: TcpStream, message: &MessageType) -> Result<TcpStream, DataProcessingError> {
-    let ser_message = serialize_message(message).map_err(|e| log::error!("Error: {:?}", e)).unwrap();
+pub fn write_to_stream(
+    mut stream: TcpStream,
+    message: &MessageType,
+) -> Result<TcpStream, DataProcessingError> {
+    let ser_message = serialize_message(message)
+        .map_err(|e| log::error!("Error: {:?}", e))
+        .unwrap();
     // Send the length of the serialized message (as 4-byte value).
     let len = ser_message.len() as u32;
     stream.write_all(&len.to_be_bytes()).unwrap();
@@ -146,9 +158,7 @@ pub fn write_to_stream(mut stream: TcpStream, message: &MessageType) -> Result<T
     Ok(stream)
 }
 
-pub fn handle_stream_message(
-    message: MessageType
-) -> MessageType {
+pub fn handle_stream_message(message: MessageType) -> MessageType {
     match &message {
         MessageType::File(name, file) => {
             // Write file into files/ dir
@@ -157,10 +167,8 @@ pub fn handle_stream_message(
                 Err(e) => {
                     log::error!("Error: {:?}", e);
                     MessageType::Text(format!("Error: {:?}", e))
-                },
-                Ok(msg) => {
-                    MessageType::Text(format!("{:?}", msg))
-                },
+                }
+                Ok(msg) => MessageType::Text(format!("{:?}", msg)),
             }
         }
         MessageType::Image(file) => {
@@ -171,20 +179,17 @@ pub fn handle_stream_message(
                 Err(e) => {
                     log::error!("Error: {:?}", e);
                     MessageType::Text(format!("Error: {:?}", e))
-                },
-                Ok(msg) => {
-                    MessageType::Text(format!("{:?}", msg))
-                },
+                }
+                Ok(msg) => MessageType::Text(format!("{:?}", msg)),
             }
         }
         MessageType::Text(_t) => {
             log::info!("Received message: {:?}", &message);
             message
         }
-        MessageType::Empty => MessageType::Empty,
+        MessageType::Empty => MessageType::Text("Error: Received empty message!".to_string()),
     }
 }
-
 
 fn get_timestamp() -> String {
     SystemTime::now()
@@ -194,7 +199,11 @@ fn get_timestamp() -> String {
         .to_string()
 }
 
-fn prepare_path(message: &MessageType, file_name: &str, current_timestamp: &str) -> Result<PathBuf, DataProcessingError> {
+fn prepare_path(
+    message: &MessageType,
+    file_name: &str,
+    current_timestamp: &str,
+) -> Result<PathBuf, DataProcessingError> {
     let path = env::current_dir();
     match path {
         Ok(mut path) => {
@@ -207,19 +216,22 @@ fn prepare_path(message: &MessageType, file_name: &str, current_timestamp: &str)
             }
             Ok(path)
         }
-        Err(e) => {
-            Err(DataProcessingError::Io(e))
-        },
+        Err(e) => Err(DataProcessingError::Io(e)),
     }
 }
 
-fn write_file(message: &MessageType, file: &[u8], file_name: &str) -> Result<String, DataProcessingError> {
+fn write_file(
+    message: &MessageType,
+    file: &[u8],
+    file_name: &str,
+) -> Result<String, DataProcessingError> {
     let path = prepare_path(message, file_name, "")?;
     let tgt_file = File::create(&path);
     match tgt_file {
         Ok(mut tgt_file) => {
             tgt_file.write_all(file).unwrap();
-            let msg = format!("Received file {} written to: {:?}",
+            let msg = format!(
+                "Received file {} written to: {:?}",
                 String::from(file_name),
                 path
             );
@@ -232,12 +244,11 @@ fn write_file(message: &MessageType, file: &[u8], file_name: &str) -> Result<Str
                 path.as_os_str().to_os_string().to_str().unwrap()
             );
             Err(DataProcessingError::Io(e))
-            
         }
     }
 }
 
-fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcessingError>{
+fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcessingError> {
     let current_timestamp = get_timestamp();
     let path = prepare_path(message, "", &current_timestamp).unwrap();
 
@@ -254,7 +265,8 @@ fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcess
             match tgt_file {
                 Ok(mut tgt_file) => {
                     tgt_file.write_all(&bytes).unwrap();
-                    let msg = format!("Received image {} written to: {:?}",
+                    let msg = format!(
+                        "Received image {} written to: {:?}",
                         current_timestamp + ".png",
                         path
                     );
@@ -267,7 +279,6 @@ fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcess
                         path.as_os_str().to_os_string().to_str().unwrap()
                     );
                     Err(DataProcessingError::Io(e))
-                    
                 }
             }
         }
