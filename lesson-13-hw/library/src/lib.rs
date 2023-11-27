@@ -1,31 +1,42 @@
 use std::{
     error::Error,
-    io,
-    net::{Ipv4Addr, SocketAddrV4},
+    io::{self, Read, Write, Cursor},
+    net::{Ipv4Addr, SocketAddrV4, TcpStream}, time::{SystemTime, UNIX_EPOCH}, env, path::PathBuf, fs::{self, File},
 };
 
+#[cfg(not(debug_assertions))]
+use ::anyhow as eyre;
+#[cfg(debug_assertions)]
+use color_eyre::eyre;
+use image::{ImageError, codecs::png::PngEncoder, io::Reader as ImageReader};
 use log;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-#[cfg(debug_assertions)]
-use color_eyre::eyre;
-#[cfg(not(debug_assertions))]
-use ::anyhow as eyre;
 
-use eyre::{Result, anyhow, Context};
+use eyre::{anyhow, Context, Result};
 
 #[derive(Error, Debug)]
 pub enum DataProcessingError {
-	#[error("Data not found: {0}")]
-	NotFound(String),
-	#[error("Invalid data format")]
-	InvalidFormat,
-	#[error("IO error")]
-	Io(#[from] std::io::Error),
-	#[error("De/Serialize error - wrong data format or corrupted data")]
+    #[error("Data not found: {0}")]
+    NotFound(String),
+    #[error("Invalid data format")]
+    InvalidFormat,
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
+    #[error("De/Serialize error - wrong data format or corrupted data")]
     Serde(#[from] serde_json::Error),
-	#[error("Exitting")]
-	Exit,
+    #[error("Cannot process image - invalid image format")]
+    ImageError(#[from] ImageError),
+    #[error("Exitting")]
+    Exit,
+}
+
+#[derive(Error, Debug)]
+pub enum ConnectionError {
+    #[error("Server not found: {0}")]
+    ServerNotFound(String),
+    #[error("Server not found: {0}")]
+    ClientDisconnected(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -96,4 +107,173 @@ pub fn get_addr(args: Vec<String>) -> Result<SocketAddrV4, crate::DataProcessing
         hostname.unwrap(),
         port.to_owned().unwrap(),
     ))
+}
+
+pub fn read_from_stream(mut stream: TcpStream) -> (TcpStream, MessageType) {
+    // Read first 4 bytes containing length of the rest of the message
+    let mut len_bytes = [0u8; 4];
+    match stream.read_exact(&mut len_bytes) {
+        Ok(it) => it,
+        Err(_err) => return (stream, MessageType::Empty),
+    };
+    let len = u32::from_be_bytes(len_bytes) as usize;
+    //println!("Len: {}", len);
+
+    if len > 0 {
+        log::info!("Receiving data...");
+        let mut buffer = vec![0u8; len];
+        stream.read_exact(&mut buffer).unwrap();
+        //println!("Buffer: {:?}", buffer);
+
+        let message = deserialize_message(&buffer);
+        let msg_type = message.unwrap();
+        (stream, msg_type)
+    } else {
+        (stream, MessageType::Empty)
+    }
+}
+
+pub fn write_to_stream(mut stream: TcpStream, message: &MessageType) -> Result<TcpStream, DataProcessingError> {
+    let ser_message = serialize_message(message).map_err(|e| log::error!("Error: {:?}", e)).unwrap();
+    // Send the length of the serialized message (as 4-byte value).
+    let len = ser_message.len() as u32;
+    stream.write_all(&len.to_be_bytes()).unwrap();
+
+    // Send the serialized message.
+    stream.write_all(ser_message.as_bytes()).unwrap();
+
+    log::info!("Transfer complete!");
+    Ok(stream)
+}
+
+pub fn handle_stream_message(
+    message: MessageType
+) -> MessageType {
+    match &message {
+        MessageType::File(name, file) => {
+            // Write file into files/ dir
+            let result = write_file(&message, &file, &name);
+            match result {
+                Err(e) => {
+                    log::error!("Error: {:?}", e);
+                    MessageType::Text(format!("Error: {:?}", e))
+                },
+                Ok(msg) => {
+                    MessageType::Text(format!("{:?}", msg))
+                },
+            }
+        }
+        MessageType::Image(file) => {
+            // Write image into files/ dir
+            let result = write_image(&message, &file);
+            // If result is error, send message back to client
+            match result {
+                Err(e) => {
+                    log::error!("Error: {:?}", e);
+                    MessageType::Text(format!("Error: {:?}", e))
+                },
+                Ok(msg) => {
+                    MessageType::Text(format!("{:?}", msg))
+                },
+            }
+        }
+        MessageType::Text(_t) => {
+            log::info!("Received message: {:?}", &message);
+            message
+        }
+        MessageType::Empty => MessageType::Empty,
+    }
+}
+
+
+fn get_timestamp() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string()
+}
+
+fn prepare_path(message: &MessageType, file_name: &str, current_timestamp: &str) -> Result<PathBuf, DataProcessingError> {
+    let path = env::current_dir();
+    match path {
+        Ok(mut path) => {
+            path.push("files");
+            let _create_dir_all = fs::create_dir_all(&path);
+            if let MessageType::Image(_i) = message {
+                path.push(String::from(current_timestamp) + ".png");
+            } else {
+                path.push(file_name);
+            }
+            Ok(path)
+        }
+        Err(e) => {
+            Err(DataProcessingError::Io(e))
+        },
+    }
+}
+
+fn write_file(message: &MessageType, file: &[u8], file_name: &str) -> Result<String, DataProcessingError> {
+    let path = prepare_path(message, file_name, "")?;
+    let tgt_file = File::create(&path);
+    match tgt_file {
+        Ok(mut tgt_file) => {
+            tgt_file.write_all(file).unwrap();
+            let msg = format!("Received file {} written to: {:?}",
+                String::from(file_name),
+                path
+            );
+            log::info!("{}", msg.as_str());
+            Ok(msg)
+        }
+        Err(e) => {
+            log::error!(
+                "Failed to open target path: {}",
+                path.as_os_str().to_os_string().to_str().unwrap()
+            );
+            Err(DataProcessingError::Io(e))
+            
+        }
+    }
+}
+
+fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcessingError>{
+    let current_timestamp = get_timestamp();
+    let path = prepare_path(message, "", &current_timestamp).unwrap();
+
+    let mut bytes: Vec<u8> = Vec::new();
+    //let img = BufReader::new(file);
+    let data = Cursor::new(file);
+    let img = ImageReader::new(data)
+        .with_guessed_format()
+        .expect("This will never fail using Cursor");
+    let img = img.decode().unwrap();
+    match img.write_with_encoder(PngEncoder::new(&mut bytes)) {
+        Ok(_res) => {
+            let tgt_file = File::create(&path);
+            match tgt_file {
+                Ok(mut tgt_file) => {
+                    tgt_file.write_all(&bytes).unwrap();
+                    let msg = format!("Received image {} written to: {:?}",
+                        current_timestamp + ".png",
+                        path
+                    );
+                    log::info!("{}", msg.as_str());
+                    Ok(msg)
+                }
+                Err(e) => {
+                    log::error!(
+                        "Failed to open target path: {}",
+                        path.as_os_str().to_os_string().to_str().unwrap()
+                    );
+                    Err(DataProcessingError::Io(e))
+                    
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("Error: Cannot encode image to PNG {:?}", e);
+            Err(DataProcessingError::ImageError(e))
+        }
+    }
 }

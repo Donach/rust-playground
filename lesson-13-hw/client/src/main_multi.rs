@@ -4,7 +4,7 @@ use std::net::{SocketAddrV4, TcpStream};
 use std::thread::{self, JoinHandle};
 
 use flume::Sender;
-use library::{await_input, serialize_message, MessageType, DataProcessingError};
+use library::{await_input, serialize_message, MessageType, DataProcessingError, ConnectionError, write_to_stream, read_from_stream};
 use log;
 
 use crate::input_handler::handle_vec_input;
@@ -42,7 +42,7 @@ fn start_input_thread(tx: flume::Sender<Vec<String>>) -> JoinHandle<()> {
     })
 }
 
-fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
+fn process_message(rx: flume::Receiver<Vec<String>>, address: &str){
     let message = rx.recv();
     match &message {
         Ok(_res) => {
@@ -53,19 +53,30 @@ fn process_message(rx: flume::Receiver<Vec<String>>, address: &str) {
                     log::info!("Exitting...");
                 }
                 _ => {
-                    log::info!("Sending data to server...");
-                    let ser_msg = serialize_message(&result.unwrap());
-                    match ser_msg {
-                        Ok(m) => {
-                            send_message(address, m);
-                            process_message(rx, address) // Recursive call
-
+                    if let Ok(stream) = TcpStream::connect(address) {
+                        log::info!("Sending data to server...");
+                        match write_to_stream(stream, &result.unwrap()) {
+                            Ok(stream) => {
+                                // Read response from server
+                                log::trace!("Awaiting response...");
+                                let (_, msg) = read_from_stream(stream);
+                                match msg {
+                                    MessageType::Text(text) => {
+                                        log::info!("Response: {}", text);
+                                    },
+                                    MessageType::Empty | MessageType::Image(_) | MessageType::File(_, _) => {
+                                        log::info!("Invalid response - expected Text response.");
+                                    }
+                                };
+                            }
+                            Err(e) => {
+                                log::error!("Error: {:?}", e);
+                            }
                         }
-                        Err(e) => {
-                            log::error!("Error: {:?}", e);
-                            ()
-                        }
+                    } else {
+                        log::error!("Could not connect to server.");
                     }
+                    process_message(rx, address); // Recursive call
                 }
             }
         }
@@ -85,7 +96,7 @@ fn start_process_message_thread(
     })
 }
 // Takes already serialized message in String object
-fn send_message(address: &str, ser_message: String) {
+fn send_message(address: &str, ser_message: String) -> Result<TcpStream, ConnectionError> {
     if let Ok(mut stream) = TcpStream::connect(address) {
         // Send the length of the serialized message (as 4-byte value).
         let len = ser_message.len() as u32;
@@ -95,8 +106,11 @@ fn send_message(address: &str, ser_message: String) {
         stream.write_all(ser_message.as_bytes()).unwrap();
 
         log::info!("Transfer complete!");
+        // Read response from server
+        Ok(stream)
     } else {
         log::error!("Could not connect to server.");
+        Err(ConnectionError::ServerNotFound(address.to_string()))
     }
 }
 
