@@ -116,7 +116,7 @@ pub fn get_addr(args: Vec<String>) -> Result<SocketAddrV4, crate::DataProcessing
     ))
 }
 
-pub async fn read_from_stream(mut stream: OwnedReadHalf) -> Result<(OwnedReadHalf, MessageType), crate::DataProcessingError> {
+pub async fn read_from_stream(mut stream: &mut OwnedReadHalf) -> Result<MessageType, crate::DataProcessingError> {
     // Read first 4 bytes containing length of the rest of the message
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes).await {
@@ -138,16 +138,16 @@ pub async fn read_from_stream(mut stream: OwnedReadHalf) -> Result<(OwnedReadHal
             Err(err) => MessageType::Error(format!("Error: {:?}", err)),
         };
 
-        Ok((stream, message))
+        Ok(message)
     } else {
         Err(DataProcessingError::NotFound("Empty stream".to_string()))
     }
 }
 
 pub async fn write_to_stream(
-    mut stream: OwnedWriteHalf,
+    stream: &mut OwnedWriteHalf,
     message: &MessageType,
-) -> Result<OwnedWriteHalf, DataProcessingError> {
+) -> Result<(), DataProcessingError> {
     let ser_message = serialize_message(message)
         .map_err(|e| log::error!("Error: {:?}", e))
         .unwrap();
@@ -163,7 +163,7 @@ pub async fn write_to_stream(
     };
 
     log::info!("Transfer complete!");
-    Ok(stream)
+    Ok(())
 }
 
 pub fn handle_stream_message(message: MessageType) -> MessageType {

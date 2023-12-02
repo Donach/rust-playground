@@ -15,7 +15,7 @@ use tokio::time::{self, Duration};
 use crate::input_handler::handle_vec_input;
 
 // Currently can process only single line of text, known limitation
-fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>> {
+fn process_input(tx: Sender<Vec<String>>) -> Result<(), Box<dyn Error>> {
     loop {
         println!("Enter operation to perform: ");
         let input = await_input()?;
@@ -32,13 +32,20 @@ fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>>
         //println!("{:?}", &input_parsed);
         match input_parsed[0] == ".quit" || input_parsed[0] == ".q" {
             true => {
-                tx.send(input_parsed).unwrap();
-                break Ok(vec!["Exitting...".to_string()])
+                //tx.send(input_parsed).unwrap();
+                break Ok(log::info!("Quit"))
                 //Ok(vec!["Exitting...".to_string()])
             }
             false => {
                 if input_parsed[0].len() > 0 {
-                    tx.send(input_parsed).unwrap();
+                    match tx.send(input_parsed) {
+                        Ok(_) => {
+
+                        }
+                        Err(e) => {
+                            break Ok(log::error!("Error: {}", e))
+                        }
+                    }
                 }
                 //process_input(tx) // Recursive call
             }
@@ -65,10 +72,9 @@ async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHal
 
                 // If input is parsed correctly, let's connect to server and send some data there
                 log::info!("Sending data to server...");
-                let result = write_to_stream(stream, &result).await;
+                let result = write_to_stream(&mut stream, &result).await;
                 match result {
-                    Ok(s) => {
-                        stream = s;
+                    Ok(_s) => {
                         log::info!("Transfer complete!");
                     },
                     Err(e) => {
@@ -95,8 +101,7 @@ async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHal
 async fn receive_message(stream: OwnedReadHalf) {
     let mut stream = stream;
     loop {
-        let (s, msg) = read_from_stream(stream).await.unwrap();
-        stream = s;
+        let msg = read_from_stream(&mut stream).await.unwrap();
         match msg {
             MessageType::Error(_e) => {
                 log::error!("Server disconnected.");
@@ -160,24 +165,31 @@ pub async fn start_multithreaded(address: SocketAddrV4) -> Result<(), Box<dyn Er
                     //receive_message(reader).await
                     let mut stream = reader;
                     loop {
-                        let res = read_from_stream(stream).await;
-                        let (s, msg) = res.unwrap();
-                        stream = s;
-                        match msg {
-                            MessageType::Error(e) => {
+                        let res = read_from_stream(&mut stream).await;
+                        match res {
+                            Ok(msg) => {
+                                match msg {
+                                    MessageType::Error(e) => {
+                                        log::error!("Server disconnected: {}", e);
+                                        return
+                                    }
+                                    _ => {
+                                        handle_stream_message(msg);
+                                    }
+                                }
+                            },
+                            Err(e) => {
                                 log::error!("Server disconnected: {}", e);
                                 return
                             }
-                            _ => {
-                                handle_stream_message(msg);
-                            }
                         }
+                        
                     }
                     
                 });
                 let _ = tokio::join!(read_task, write_task);
                 log::info!("Last Line");
-                break; // Break out of the loop once the connection is established
+                //break; // Break out of the loop once the connection is established
             },
         }
     }

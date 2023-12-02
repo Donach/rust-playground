@@ -50,9 +50,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                      */
-                    result = read_from_stream(reader) => {
+                    result = read_from_stream(&mut reader) => {
                         let n = match &result {
-                            Ok((_, msg)) => {
+                            Ok(msg) => {
                                 match &msg {
                                     MessageType::Error(e) => {
                                         return log::error!("Error: {}", e)
@@ -64,9 +64,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 return log::error!("Error: {}", e)
                             }
                         };
-                        let (r, msg) = result.unwrap();
+                        let msg = result.unwrap();
                         let broadcast_msg = (client_id, msg);
-                        reader = r;
 
                         if tx.send(broadcast_msg).is_err() {
                             break;
@@ -84,7 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let (sender_id, msg) = received;
 
                         if sender_id != client_id {
-                            let result = write_to_stream(writer, &msg).await;
+                            let result = write_to_stream(&mut writer, &msg).await;
                             match result {
                                 Ok(_) => (),
                                 Err(e) => {
