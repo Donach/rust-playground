@@ -9,6 +9,8 @@ use library::{await_input, handle_stream_message, read_from_stream, write_to_str
 use log;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedWriteHalf, OwnedReadHalf};
+use tokio::time::{self, Duration};
 
 use crate::input_handler::handle_vec_input;
 
@@ -44,7 +46,7 @@ fn process_input(tx: Sender<Vec<String>>) -> Result<Vec<String>, Box<dyn Error>>
     }
 }
 
-async fn process_message(rx: flume::Receiver<Vec<String>>, stream: tokio::io::WriteHalf<tokio::net::TcpStream>) {
+async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHalf) {
     let mut stream = stream;
     loop {
         match rx.recv() {
@@ -90,10 +92,10 @@ async fn process_message(rx: flume::Receiver<Vec<String>>, stream: tokio::io::Wr
     }
 }
 
-async fn receive_message(stream: tokio::io::ReadHalf<tokio::net::TcpStream>) {
+async fn receive_message(stream: OwnedReadHalf) {
     let mut stream = stream;
     loop {
-        let (s, msg) = read_from_stream(stream).await;
+        let (s, msg) = read_from_stream(stream).await.unwrap();
         stream = s;
         match msg {
             MessageType::Error(_e) => {
@@ -109,51 +111,77 @@ async fn receive_message(stream: tokio::io::ReadHalf<tokio::net::TcpStream>) {
 
 pub async fn start_multithreaded(address: SocketAddrV4) -> Result<(), Box<dyn Error>> {
     log::info!("Starting interactive mode @{}", address);
-    let stream = TcpStream::connect(address).await?;
-    let (reader, writer) = tokio::io::split(stream);
+    // Define the retry interval and total retry duration
+    let retry_interval = Duration::from_secs(10);
+    let total_retry_duration = Duration::from_secs(10 * 60); // 10 minutes
+    let start_time = time::Instant::now();
 
-    let write_task = tokio::spawn(async move {
-        log::info!("Starting write task...");
-        // Thread for reading from stdin
-        let (tx, rx) = flume::unbounded();
-        let t_input = tokio::spawn(async move {
-            //log::info!("Starting process input thread.");
-            log::info!("Starting process_input task...");
-            let _ = process_input(tx);
-        });
-        // Thread that processes stdin and submits data to server
-        let t_process_input = tokio::spawn(async move {
-            //log::info!("Starting process message thread.");
-            log::info!("Starting process_message task...");
-            process_message(rx, writer).await
-        });
+    loop {
+        match TcpStream::connect(address).await {
+            Err(e) => {
+                log::error!("Failed to connect: {}", e);
 
-        let _ = tokio::try_join!(t_input, t_process_input);
-    });
-
-    let read_task = tokio::spawn(async move {
-        log::info!("Starting reader task...");
-        // Thread that reads data from server
-            //log::info!("Starting process message thread.");
-        
-        //receive_message(reader).await
-        let mut stream = reader;
-        loop {
-            let (s, msg) = read_from_stream(stream).await;
-            stream = s;
-            match msg {
-                MessageType::Error(e) => {
-                    log::error!("Server disconnected: {}", e);
-                    break
+                // Check if total retry duration is exceeded
+                if time::Instant::now().duration_since(start_time) > total_retry_duration {
+                    log::error!("Failed to connect to server after 10 minutes, exiting.");
+                    return Err(Box::new(e));
                 }
-                _ => {
-                    handle_stream_message(msg);
-                }
+
+                // Wait for the retry interval
+                time::sleep(retry_interval).await;
             }
+            Ok(stream) => {
+                let (reader, writer) = stream.into_split();
+
+                let write_task = tokio::spawn(async move {
+                    log::info!("Starting write task...");
+                    // Thread for reading from stdin
+                    let (tx, rx) = flume::unbounded();
+                    let t_input = tokio::spawn(async move {
+                        //log::info!("Starting process input thread.");
+                        log::info!("Starting process_input task...");
+                        let _ = process_input(tx);
+                    });
+                    // Thread that processes stdin and submits data to server
+                    let t_process_input = tokio::spawn(async move {
+                        //log::info!("Starting process message thread.");
+                        log::info!("Starting process_message task...");
+                        process_message(rx, writer).await
+                    });
+
+                    let _ = tokio::try_join!(t_input, t_process_input);
+                });
+
+                let read_task = tokio::spawn(async move {
+                    log::info!("Starting reader task...");
+                    // Thread that reads data from server
+                        //log::info!("Starting process message thread.");
+                    
+                    //receive_message(reader).await
+                    let mut stream = reader;
+                    loop {
+                        let res = read_from_stream(stream).await;
+                        let (s, msg) = res.unwrap();
+                        stream = s;
+                        match msg {
+                            MessageType::Error(e) => {
+                                log::error!("Server disconnected: {}", e);
+                                return
+                            }
+                            _ => {
+                                handle_stream_message(msg);
+                            }
+                        }
+                    }
+                    
+                });
+                let _ = tokio::join!(read_task, write_task);
+                log::info!("Last Line");
+                break; // Break out of the loop once the connection is established
+            },
         }
+    }
         
-    });
-    let _ = tokio::join!(read_task, write_task);
-    log::info!("Last Line");
+    
     Ok(())
 }

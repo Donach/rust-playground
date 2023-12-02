@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[cfg(not(debug_assertions))]
@@ -46,7 +46,7 @@ pub enum ConnectionError {
     ClientDisconnected(String),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MessageType {
     Text(String),
     Image(Vec<u8>),
@@ -116,12 +116,12 @@ pub fn get_addr(args: Vec<String>) -> Result<SocketAddrV4, crate::DataProcessing
     ))
 }
 
-pub async fn read_from_stream(mut stream: tokio::io::ReadHalf<tokio::net::TcpStream>) -> (tokio::io::ReadHalf<tokio::net::TcpStream>, MessageType) {
+pub async fn read_from_stream(mut stream: OwnedReadHalf) -> Result<(OwnedReadHalf, MessageType), crate::DataProcessingError> {
     // Read first 4 bytes containing length of the rest of the message
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes).await {
         Ok(it) => it,
-        Err(err) => return (stream, MessageType::Error(format!("Error: {:?}", err))),
+        Err(err) => return Err(DataProcessingError::Io(err)),
     };
 
     let len = u32::from_be_bytes(len_bytes) as usize;
@@ -130,7 +130,7 @@ pub async fn read_from_stream(mut stream: tokio::io::ReadHalf<tokio::net::TcpStr
         let mut buffer = vec![0u8; len];
         match stream.read_exact(&mut buffer).await {
             Ok(it) => it,
-            Err(err) => return (stream, MessageType::Error(format!("Error: {:?}", err))),
+            Err(err) => return Err(DataProcessingError::Io(err)),
         };
 
         let message = match deserialize_message(&buffer) {
@@ -138,19 +138,16 @@ pub async fn read_from_stream(mut stream: tokio::io::ReadHalf<tokio::net::TcpStr
             Err(err) => MessageType::Error(format!("Error: {:?}", err)),
         };
 
-        (stream, message)
+        Ok((stream, message))
     } else {
-        (
-            stream,
-            MessageType::Error(format!("Error: received no data !")),
-        )
+        Err(DataProcessingError::NotFound("Empty stream".to_string()))
     }
 }
 
 pub async fn write_to_stream(
-    mut stream: tokio::io::WriteHalf<tokio::net::TcpStream>,
+    mut stream: OwnedWriteHalf,
     message: &MessageType,
-) -> Result<tokio::io::WriteHalf<tokio::net::TcpStream>, DataProcessingError> {
+) -> Result<OwnedWriteHalf, DataProcessingError> {
     let ser_message = serialize_message(message)
         .map_err(|e| log::error!("Error: {:?}", e))
         .unwrap();
