@@ -1,5 +1,6 @@
 use std::error::Error;
 
+use std::f32::consts::E;
 use std::net::{SocketAddrV4};
 use std::thread::{self};
 
@@ -30,12 +31,9 @@ fn process_input(tx: Sender<Vec<String>>) -> Result<(), Box<dyn Error>> {
             "" => vec![left.to_string()],
             _ => vec![left.to_string(), right.to_string()],
         };
-        //println!("{:?}", &input_parsed);
         match input_parsed[0] == ".quit" || input_parsed[0] == ".q" {
             true => {
-                //tx.send(input_parsed).unwrap();
                 break Ok(log::info!("Quit"))
-                //Ok(vec!["Exitting...".to_string()])
             }
             false => {
                 if input_parsed[0].len() > 0 {
@@ -48,25 +46,25 @@ fn process_input(tx: Sender<Vec<String>>) -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
-                //process_input(tx) // Recursive call
             }
         }
     }
 }
 
-async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHalf) {
+async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHalf) -> Result<(), Box<dyn Error>> {
     let mut stream = stream;
     loop {
         match rx.recv() {
-            Err(err) => {
-                log::error!("Error: {:?}", err);
+            Err(e) => {
+                log::error!("Unhandled Error - server likely disconnected: {:?}", e);
+                return Err(Box::new(e))
             }
             Ok(message) => {
                 let result = match handle_vec_input(message) {
                     Err(e) => {
-                        log::info!("Error: {}", e.to_string());
+                        log::info!("Wrong input: {}", e.to_string());
                         //let _ = process_message(rx, stream);
-                        break;
+                        return Err(e)
                     }
                     Ok(result) => result,
                 };
@@ -79,21 +77,10 @@ async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHal
                         log::info!("Transfer complete!");
                     },
                     Err(e) => {
-                        log::error!("Error: {}", e);
-                        break
+                        log::error!("Cannot send data to server: {}", e);
+                        return Err(Box::new(e))
                     },
                 }
-                /* match write_to_stream(stream, &result).await {
-                    Err(e) => {
-                        log::error!("Error: {:?}", e);
-                    }
-                    Ok(stream) => {
-                        // Read response from server
-                        log::trace!("Data sent!");
-                        // Lastly, continue recursively waiting for new user input
-                        //let _ = process_message(rx, stream); // Recursive call
-                    }
-                }; */
             }
         }
     }
@@ -192,45 +179,54 @@ pub async fn start_multithreaded(conninfo: (SocketAddrV4, Uuid)) -> Result<(), B
             }
             Ok(stream) => {
                 let (mut reader, mut writer) = stream.into_split();
-                // TODO: Let's "authenticate" first
 
+                // Authentication
                 if ! handle_auth(uid, &mut writer, &mut reader).await.is_err() {
-
                     let write_task = tokio::spawn(async move {
                         log::info!("Starting write task...");
                         // Thread for reading from stdin
                         let (tx, rx) = flume::unbounded();
                         let t_input = tokio::spawn(async move {
-                            //log::info!("Starting process input thread.");
                             log::info!("Starting process_input task...");
-                            let _ = process_input(tx);
+                            match process_input(tx) {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    log::error!("Error: {}", e);
+                                    return Err(DataProcessingError::InvalidFormat)
+                                }
+                            }
                         });
                         // Thread that processes stdin and submits data to server
                         let t_process_input = tokio::spawn(async move {
-                            //log::info!("Starting process message thread.");
                             log::info!("Starting process_message task...");
-                            process_message(rx, writer).await
+                            match process_message(rx, writer).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    log::error!("Processing error: {}", e);
+                                    return Err(DataProcessingError::InvalidFormat)
+                                }
+                            }
                         });
 
-                        let _ = tokio::try_join!(t_input, t_process_input);
+                        //let _ = tokio::try_join!(t_input, t_process_input);
                     });
                     let read_task = tokio::spawn(async move {
                         log::info!("Starting reader task...");
                         // Thread that reads data from server
-                        //log::info!("Starting process message thread.");
-                        
-                        receive_message(&mut reader).await;
-                        
+                        match receive_message(&mut reader).await {
+                            Ok(msg) => {
+                                log::info!("Message received: {:?}", msg);
+                                return Ok(msg)
+                            }
+                            Err(e) => {
+                                return Err(ConnectionError::ServerNotFound(format!("Server disconnected {}", e)))
+                            }
+                        }
                     });
-                    let _ = tokio::join!(read_task, write_task);
+                    let _ = tokio::try_join!(read_task, write_task);
                     log::info!("Last Line");
-                
                 }
-                //break; // Break out of the loop once the connection is established
             },
         }
     }
-        
-    
-    Ok(())
 }
