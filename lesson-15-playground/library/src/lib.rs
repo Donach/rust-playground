@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
+use uuid::Uuid;
 
 use tokio::net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -46,12 +47,13 @@ pub enum ConnectionError {
     ClientDisconnected(String),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MessageType {
     Text(String),
     Image(Vec<u8>),
     File(String, Vec<u8>), // Filename and its content as bytes
     Error(String),
+    Auth(String),
 }
 
 pub fn serialize_message(message: &MessageType) -> Result<String, crate::DataProcessingError> {
@@ -77,16 +79,18 @@ pub fn await_input() -> Result<String, crate::DataProcessingError> {
 }
 
 // Returns a SocketAddr, using default if cannot parse and/or no args given
-pub fn get_addr(args: Vec<String>) -> Result<SocketAddrV4, crate::DataProcessingError> {
+pub fn get_addr(args: Vec<String>) -> Result<(SocketAddrV4, Uuid), crate::DataProcessingError> {
     // Evaluate args
     //println!("{:?}", args);
     // Validate args for hostname and port
     let hostname: Result<Ipv4Addr, std::net::AddrParseError>;
     let port: Result<u16, std::num::ParseIntError>;
-    if args.len() < 3 {
-        log::warn!("Usage: server <hostname> <port>; using default values now...");
+    let uid: Result<Uuid, uuid::Error>;
+    if args.len() < 4 {
+        log::warn!("Usage: server/client <hostname> <port> <uid>; using default values now...");
         hostname = "127.0.0.1".parse::<Ipv4Addr>();
         port = "11111".parse::<u16>();
+        uid = Ok(Uuid::new_v4());
     } else {
         hostname = args[1].parse::<Ipv4Addr>(); //Ipv4Addr::from_str(&args[1]).unwrap();
         match hostname {
@@ -108,15 +112,26 @@ pub fn get_addr(args: Vec<String>) -> Result<SocketAddrV4, crate::DataProcessing
                 panic!()
             }
         }
+
+        uid = args[3].parse::<Uuid>();
+        match uid {
+            Ok(p) => {
+                log::info!("Parsed uid: {:?}", &p);
+            }
+            Err(e) => {
+                log::error!("Error parsing uid: {:?}", e);
+                panic!()
+            }
+        }
     }
 
-    Ok(SocketAddrV4::new(
+    Ok((SocketAddrV4::new(
         hostname.unwrap(),
         port.to_owned().unwrap(),
-    ))
+    ), uid.unwrap()))
 }
 
-pub async fn read_from_stream(mut stream: &mut OwnedReadHalf) -> Result<MessageType, crate::DataProcessingError> {
+pub async fn read_from_stream(stream: &mut OwnedReadHalf) -> Result<MessageType, crate::DataProcessingError> {
     // Read first 4 bytes containing length of the rest of the message
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes).await {
@@ -126,7 +141,7 @@ pub async fn read_from_stream(mut stream: &mut OwnedReadHalf) -> Result<MessageT
 
     let len = u32::from_be_bytes(len_bytes) as usize;
     if len > 0 {
-        log::info!("Receiving data...");
+        log::trace!("Receiving data...");
         let mut buffer = vec![0u8; len];
         match stream.read_exact(&mut buffer).await {
             Ok(it) => it,
@@ -138,6 +153,7 @@ pub async fn read_from_stream(mut stream: &mut OwnedReadHalf) -> Result<MessageT
             Err(err) => MessageType::Error(format!("Error: {:?}", err)),
         };
 
+        log::trace!("Data received!");
         Ok(message)
     } else {
         Err(DataProcessingError::NotFound("Empty stream".to_string()))
@@ -168,6 +184,11 @@ pub async fn write_to_stream(
 
 pub fn handle_stream_message(message: MessageType) -> MessageType {
     match &message {
+        MessageType::Auth(uid) => {
+            log::info!("Authenticating user {:?}", &uid);
+            // Save UID in DB
+            MessageType::Auth(format!("{:?}", uid))
+        }
         MessageType::File(name, file) => {
             // Write file into files/ dir
             let result = write_file(&message, &file, &name);

@@ -5,12 +5,13 @@ use std::thread::{self};
 
 use anyhow::Context;
 use flume::Sender;
-use library::{await_input, handle_stream_message, read_from_stream, write_to_stream, MessageType};
+use library::{await_input, handle_stream_message, read_from_stream, write_to_stream, MessageType, DataProcessingError, ConnectionError};
 use log;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedWriteHalf, OwnedReadHalf};
 use tokio::time::{self, Duration};
+use uuid::Uuid;
 
 use crate::input_handler::handle_vec_input;
 
@@ -98,23 +99,77 @@ async fn process_message(rx: flume::Receiver<Vec<String>>, stream: OwnedWriteHal
     }
 }
 
-async fn receive_message(stream: OwnedReadHalf) {
+async fn receive_message(stream: &mut OwnedReadHalf) -> Result<MessageType, Box<dyn Error>> {
     let mut stream = stream;
     loop {
-        let msg = read_from_stream(&mut stream).await.unwrap();
-        match msg {
-            MessageType::Error(_e) => {
-                log::error!("Server disconnected.");
-                break;
-            }
-            _ => {
-                handle_stream_message(msg);
+        let res = read_from_stream(&mut stream).await;
+        match res {
+            Ok(msg) => {
+                match &msg {
+                    MessageType::Error(e) => {
+                        log::error!("Server disconnected: {}", e);
+                        return Err(Box::new(ConnectionError::ClientDisconnected(e.to_string())))
+                    }
+                    MessageType::Auth(uid) => {
+                        log::info!("Server Authenticated Client Success: {}", uid);
+                        return Ok(msg)
+                    }
+                    _ => {
+                        handle_stream_message(msg);
+                    }
+                }
+            },
+            Err(e) => {
+                log::error!("Server disconnected: {}", e);
+                return Err(Box::new(e))
             }
         }
+        
     }
 }
+async fn handle_auth(uid: Uuid, writer: &mut OwnedWriteHalf, reader: &mut OwnedReadHalf) -> Result<bool, Box<dyn Error>> {
+    let mut skip = false;
+    log::info!("Starting authentication... {}", uid.to_string());
+    match handle_vec_input(vec![".auth".to_string(), uid.to_string()]) {
+        Err(e) => {
+            log::error!("Authentication Error: {}", e.to_string());
+            skip = true;
+        }
+        Ok(auth_msg) => {
+            match write_to_stream(writer, &auth_msg).await {
+                Ok(_s) => {
+                    log::info!("Authentication sent!");
+                    // Wait for server reply
+                    match receive_message(reader).await {
+                        Ok(return_msg) => {
+                            match auth_msg == return_msg {
+                                true => {
+                                    log::info!("Authentication successful!");
+                                }
+                                false => {
+                                    log::error!("Authentication failed!");
+                                    return Err(Box::new(ConnectionError::ServerNotFound("Authentication failed!".to_string())));
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            log::error!("Authentication Error: {}", e);
+                            return Err(e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    log::error!("Authentication Error: {}", e);
+                    return Err(Box::new(e));
+                },
+            }
+        },
+    };
+    Ok(true)
+}
 
-pub async fn start_multithreaded(address: SocketAddrV4) -> Result<(), Box<dyn Error>> {
+pub async fn start_multithreaded(conninfo: (SocketAddrV4, Uuid)) -> Result<(), Box<dyn Error>> {
+    let (address, uid) = conninfo.into();
     log::info!("Starting interactive mode @{}", address);
     // Define the retry interval and total retry duration
     let retry_interval = Duration::from_secs(10);
@@ -136,59 +191,41 @@ pub async fn start_multithreaded(address: SocketAddrV4) -> Result<(), Box<dyn Er
                 time::sleep(retry_interval).await;
             }
             Ok(stream) => {
-                let (reader, writer) = stream.into_split();
+                let (mut reader, mut writer) = stream.into_split();
+                // TODO: Let's "authenticate" first
 
-                let write_task = tokio::spawn(async move {
-                    log::info!("Starting write task...");
-                    // Thread for reading from stdin
-                    let (tx, rx) = flume::unbounded();
-                    let t_input = tokio::spawn(async move {
-                        //log::info!("Starting process input thread.");
-                        log::info!("Starting process_input task...");
-                        let _ = process_input(tx);
+                if ! handle_auth(uid, &mut writer, &mut reader).await.is_err() {
+
+                    let write_task = tokio::spawn(async move {
+                        log::info!("Starting write task...");
+                        // Thread for reading from stdin
+                        let (tx, rx) = flume::unbounded();
+                        let t_input = tokio::spawn(async move {
+                            //log::info!("Starting process input thread.");
+                            log::info!("Starting process_input task...");
+                            let _ = process_input(tx);
+                        });
+                        // Thread that processes stdin and submits data to server
+                        let t_process_input = tokio::spawn(async move {
+                            //log::info!("Starting process message thread.");
+                            log::info!("Starting process_message task...");
+                            process_message(rx, writer).await
+                        });
+
+                        let _ = tokio::try_join!(t_input, t_process_input);
                     });
-                    // Thread that processes stdin and submits data to server
-                    let t_process_input = tokio::spawn(async move {
+                    let read_task = tokio::spawn(async move {
+                        log::info!("Starting reader task...");
+                        // Thread that reads data from server
                         //log::info!("Starting process message thread.");
-                        log::info!("Starting process_message task...");
-                        process_message(rx, writer).await
-                    });
-
-                    let _ = tokio::try_join!(t_input, t_process_input);
-                });
-
-                let read_task = tokio::spawn(async move {
-                    log::info!("Starting reader task...");
-                    // Thread that reads data from server
-                        //log::info!("Starting process message thread.");
-                    
-                    //receive_message(reader).await
-                    let mut stream = reader;
-                    loop {
-                        let res = read_from_stream(&mut stream).await;
-                        match res {
-                            Ok(msg) => {
-                                match msg {
-                                    MessageType::Error(e) => {
-                                        log::error!("Server disconnected: {}", e);
-                                        return
-                                    }
-                                    _ => {
-                                        handle_stream_message(msg);
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                log::error!("Server disconnected: {}", e);
-                                return
-                            }
-                        }
                         
-                    }
-                    
-                });
-                let _ = tokio::join!(read_task, write_task);
-                log::info!("Last Line");
+                        receive_message(&mut reader).await;
+                        
+                    });
+                    let _ = tokio::join!(read_task, write_task);
+                    log::info!("Last Line");
+                
+                }
                 //break; // Break out of the loop once the connection is established
             },
         }

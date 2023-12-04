@@ -10,6 +10,7 @@ pub enum Operation {
     Image,
     Quit,
     Text,
+    Auth
 }
 impl From<&str> for Operation {
     fn from(value: &str) -> Self {
@@ -29,6 +30,10 @@ impl From<&str> for Operation {
             ".q" => {
                 log::trace!("Operation: Quit");
                 Operation::Quit
+            }
+            ".auth" => {
+                log::trace!("Operation: Authenticaiton");
+                Operation::Auth
             }
             _ => {
                 log::trace!("Operation: Text");
@@ -77,6 +82,10 @@ fn handle_text(input: &str) -> Result<MessageType, Box<dyn Error>> {
     Ok(MessageType::Text(input.to_string()))
 }
 
+fn handle_auth(input: &str) -> Result<MessageType, Box<dyn Error>> {
+    Ok(MessageType::Auth(input.split(" ").collect::<Vec<&str>>()[1].to_string()))
+}
+
 fn handle_file(input: &str) -> Result<MessageType, Box<dyn Error>> {
     let (_left, right) = match input.splitn(2, ' ').collect::<Vec<&str>>().as_slice() {
         [left, right] => (*left, *right),
@@ -105,6 +114,7 @@ fn handle_operation(operation: &Operation, input: &str) -> Result<MessageType, B
         Operation::Image => handle_image(input),
         Operation::Quit => Err("Exitting...".into()),
         Operation::Text => handle_text(input),
+        Operation::Auth => handle_auth(input),
     }
 }
 
