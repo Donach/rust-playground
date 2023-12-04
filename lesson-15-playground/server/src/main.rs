@@ -18,10 +18,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
    
     let listener = TcpListener::bind("127.0.0.1:11111").await?;
     let (tx, _rx) = broadcast::channel(10);
-    let mut clients: Arc<Mutex<HashMap<SocketAddr, Uuid>>> = Arc::new(Mutex::new(HashMap::new()));
+    let clients: Arc<Mutex<HashMap<SocketAddr, Uuid>>> = Arc::new(Mutex::new(HashMap::new()));
     
 
     loop {
+        let clients = Arc::clone(&clients);
         let (socket, socket_addr) = listener.accept().await?;
         let tx = tx.clone();
         let mut rx = tx.subscribe();
@@ -89,11 +90,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                     let msg = result.unwrap();
                                                     let addr = socket_addr.to_string().clone();
                                                     let broadcast_msg = (addr, msg);
-                                                    //&clients.lock().unwrap().insert(socket_addr, Uuid::try_parse(&uid.to_string()).unwrap());
-
                                                     if tx.send(broadcast_msg).is_err() {
                                                         break;
                                                     }
+                                                    clients.lock().unwrap().insert(socket_addr.clone(), Uuid::try_parse(&uid.to_string()).unwrap());
+                                                    
                                                 },
                                                 Err(e) => {
                                                     return log::error!("Error: {}", e)
@@ -104,14 +105,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     _ => {
                                         let msg = result.unwrap();
                                         let addr = socket_addr.to_string().clone();
-                                        let broadcast_msg = (addr, msg);
+                                        let broadcast_msg = (addr, msg.clone());
 
                                         if tx.send(broadcast_msg).is_err() {
                                             break;
                                         } else {
-                                            //let uid = &clients.lock().unwrap().get(&socket_addr).unwrap();
+                                            let uid = &clients.lock().unwrap().get(&socket_addr).unwrap().clone();
                                             // Save message to DB
-                                            //save_message(&db_pool, uid.to_string(), serialize_message(&msg).unwrap());
+                                            match save_message(&db_pool, uid.to_string(), serialize_message(&msg).unwrap()).await.is_err() {
+                                                false => (),
+                                                true => {
+                                                    log::error!("Cannot save message to DB");
+                                                }
+                                            };
+
                                         }
 
                                     },
