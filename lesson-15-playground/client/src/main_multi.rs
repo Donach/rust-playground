@@ -134,13 +134,13 @@ async fn handle_auth(
                             }
                         },
                         Err(e) => {
-                            log::error!("Authentication Error: {}", e);
+                            log::error!("Authentication Error: Invalid login {}", e);
                             return Err(e);
                         }
                     }
                 }
                 Err(e) => {
-                    log::error!("Authentication Error: {}", e);
+                    log::error!("Authentication Error: Server Disconnected {}", e);
                     return Err(Box::new(e));
                 }
             }
@@ -185,7 +185,7 @@ pub async fn start_multithreaded(conninfo: (SocketAddrV4, Uuid)) -> Result<(), B
                             match process_input(tx) {
                                 Ok(_) => Ok(()),
                                 Err(e) => {
-                                    log::error!("Error: {}", e);
+                                    log::error!("Input Error: {}", e);
                                     Err(DataProcessingError::InvalidFormat)
                                 }
                             }
