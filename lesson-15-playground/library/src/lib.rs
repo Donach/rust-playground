@@ -1,15 +1,18 @@
+use anyhow::Context;
 use std::{
     env,
-    fs::{self, File},
-    io::{self, Cursor, Read, Write},
+    io::{self, Cursor},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 
-use tokio::net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    fs::{self, File},
+    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+};
 
 #[cfg(not(debug_assertions))]
 use ::anyhow as eyre;
@@ -17,7 +20,6 @@ use ::anyhow as eyre;
 #[cfg(debug_assertions)]
 use color_eyre::eyre;
 use image::{codecs::png::PngEncoder, io::Reader as ImageReader, ImageError};
-use log;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -57,11 +59,21 @@ pub enum MessageType {
 }
 
 pub fn serialize_message(message: &MessageType) -> Result<String, crate::DataProcessingError> {
-    Ok(serde_json::to_string(message).map_err(|e| e)?)
+    Ok(serde_json::to_string(message)?)
 }
 
 pub fn deserialize_message(data: &[u8]) -> Result<MessageType, crate::DataProcessingError> {
-    Ok(serde_json::from_slice(data).map_err(|e| e)?)
+    Ok(serde_json::from_slice(data)?)
+}
+
+pub fn serialize_message_as_bin(
+    message: &MessageType,
+) -> Result<Vec<u8>, crate::DataProcessingError> {
+    Ok(bincode::serialize(message).unwrap())
+}
+
+pub fn deserialize_message_as_bin(data: &[u8]) -> Result<MessageType, crate::DataProcessingError> {
+    Ok(bincode::deserialize(data).unwrap())
 }
 
 pub fn await_input() -> Result<String, crate::DataProcessingError> {
@@ -92,7 +104,7 @@ pub fn get_addr(args: Vec<String>) -> Result<(SocketAddrV4, Uuid), crate::DataPr
         port = "11111".parse::<u16>();
         uid = Ok(Uuid::new_v4());
     } else {
-        hostname = args[1].parse::<Ipv4Addr>(); //Ipv4Addr::from_str(&args[1]).unwrap();
+        hostname = args[1].parse::<Ipv4Addr>();
         match hostname {
             Ok(h) => {
                 log::info!("Parsed hostname: {:?}", h);
@@ -125,13 +137,15 @@ pub fn get_addr(args: Vec<String>) -> Result<(SocketAddrV4, Uuid), crate::DataPr
         }
     }
 
-    Ok((SocketAddrV4::new(
-        hostname.unwrap(),
-        port.to_owned().unwrap(),
-    ), uid.unwrap()))
+    Ok((
+        SocketAddrV4::new(hostname.unwrap(), port.to_owned().unwrap()),
+        uid.unwrap(),
+    ))
 }
 
-pub async fn read_from_stream(stream: &mut OwnedReadHalf) -> Result<MessageType, crate::DataProcessingError> {
+pub async fn read_from_stream(
+    stream: &mut OwnedReadHalf,
+) -> Result<MessageType, crate::DataProcessingError> {
     // Read first 4 bytes containing length of the rest of the message
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes).await {
@@ -169,7 +183,10 @@ pub async fn write_to_stream(
         .unwrap();
     // Send the length of the serialized message (as 4-byte value).
     let len = ser_message.len() as u32;
-    stream.write_all(&len.to_be_bytes()).await.expect("Failed to write to stream");
+    stream
+        .write_all(&len.to_be_bytes())
+        .await
+        .expect("Failed to write to stream");
 
     // Send the serialized message.
     let s = stream.write_all(ser_message.as_bytes()).await;
@@ -182,7 +199,7 @@ pub async fn write_to_stream(
     Ok(())
 }
 
-pub fn handle_stream_message(message: MessageType) -> MessageType {
+pub async fn handle_stream_message(message: MessageType) -> MessageType {
     match &message {
         MessageType::Auth(uid) => {
             log::info!("Authenticating user {:?}", &uid);
@@ -191,8 +208,8 @@ pub fn handle_stream_message(message: MessageType) -> MessageType {
         }
         MessageType::File(name, file) => {
             // Write file into files/ dir
-            let result = write_file(&message, &file, &name);
-            match result {
+            let result = write_file(&message, file, name);
+            match result.await {
                 Err(e) => {
                     log::error!("Error: {:?}", e);
                     MessageType::Text(format!("Error: {:?}", e))
@@ -202,9 +219,9 @@ pub fn handle_stream_message(message: MessageType) -> MessageType {
         }
         MessageType::Image(file) => {
             // Write image into files/ dir
-            let result = write_image(&message, &file);
+            let result = write_image(&message, file);
             // If result is error, send message back to client
-            match result {
+            match result.await {
                 Err(e) => {
                     log::error!("Error: {:?}", e);
                     MessageType::Text(format!("Error: {:?}", e))
@@ -228,7 +245,7 @@ fn get_timestamp() -> String {
         .to_string()
 }
 
-fn prepare_path(
+async fn prepare_path(
     message: &MessageType,
     file_name: &str,
     current_timestamp: &str,
@@ -237,7 +254,13 @@ fn prepare_path(
     match path {
         Ok(mut path) => {
             path.push("files");
-            let _create_dir_all = fs::create_dir_all(&path);
+            match fs::create_dir_all(&path).await {
+                Ok(_) => {}
+                Err(e) => {
+                    log::error!("Failed to create target path: {}", e);
+                    return Err(DataProcessingError::Io(e));
+                }
+            };
             if let MessageType::Image(_i) = message {
                 path.push(String::from(current_timestamp) + ".png");
             } else {
@@ -249,16 +272,17 @@ fn prepare_path(
     }
 }
 
-fn write_file(
+async fn write_file(
     message: &MessageType,
     file: &[u8],
     file_name: &str,
 ) -> Result<String, DataProcessingError> {
-    let path = prepare_path(message, file_name, "")?;
-    let tgt_file = File::create(&path);
-    match tgt_file {
-        Ok(mut tgt_file) => {
-            tgt_file.write_all(file).unwrap();
+    let path = prepare_path(message, file_name, "").await?;
+    let tgt_file = File::create(&path)
+        .await
+        .context(format!("Cannot create file at {:?}", &path.to_str()));
+    match tgt_file.unwrap().write_all(file).await {
+        Ok(_) => {
             let msg = format!(
                 "Received file {} written to: {:?}",
                 String::from(file_name),
@@ -277,9 +301,9 @@ fn write_file(
     }
 }
 
-fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcessingError> {
+async fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcessingError> {
     let current_timestamp = get_timestamp();
-    let path = prepare_path(message, "", &current_timestamp).unwrap();
+    let path = prepare_path(message, "", &current_timestamp).await?;
 
     let mut bytes: Vec<u8> = Vec::new();
     //let img = BufReader::new(file);
@@ -290,10 +314,11 @@ fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcess
     let img = img.decode().unwrap();
     match img.write_with_encoder(PngEncoder::new(&mut bytes)) {
         Ok(_res) => {
-            let tgt_file = File::create(&path);
-            match tgt_file {
-                Ok(mut tgt_file) => {
-                    tgt_file.write_all(&bytes).unwrap();
+            let tgt_file = File::create(&path)
+                .await
+                .context(format!("Cannot create file at {:?}", &path.to_str()));
+            match tgt_file.unwrap().write_all(&bytes).await {
+                Ok(_) => {
                     let msg = format!(
                         "Received image {} written to: {:?}",
                         current_timestamp + ".png",

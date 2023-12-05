@@ -2,7 +2,6 @@ use std::{error::Error, fs::File, io::Read, path::Path};
 
 use anyhow::Result;
 use library::MessageType;
-use log;
 
 #[derive(Debug)]
 pub enum Operation {
@@ -10,7 +9,7 @@ pub enum Operation {
     Image,
     Quit,
     Text,
-    Auth
+    Auth, // TODO: Add LoadAll - load all missed messages by this client
 }
 impl From<&str> for Operation {
     fn from(value: &str) -> Self {
@@ -83,7 +82,9 @@ fn handle_text(input: &str) -> Result<MessageType, Box<dyn Error>> {
 }
 
 fn handle_auth(input: &str) -> Result<MessageType, Box<dyn Error>> {
-    Ok(MessageType::Auth(input.split(" ").collect::<Vec<&str>>()[1].to_string()))
+    Ok(MessageType::Auth(
+        input.split(' ').collect::<Vec<&str>>()[1].to_string(),
+    ))
 }
 
 fn handle_file(input: &str) -> Result<MessageType, Box<dyn Error>> {

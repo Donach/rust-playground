@@ -1,12 +1,10 @@
-use crate::db_client::{setup_database_pool, auth_client, save_message};
-use library::{get_addr, read_from_stream, write_to_stream, MessageType, serialize_message};
+use crate::db_client::{auth_client, save_message, setup_database_pool};
+use library::{read_from_stream, write_to_stream, MessageType};
 use std::collections::HashMap;
-use std::env;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 mod db_client;
@@ -15,11 +13,10 @@ mod db_client;
 async fn main() -> Result<(), Box<dyn Error>> {
     simple_logger::SimpleLogger::new().env().init().unwrap();
     dotenvy::dotenv()?;
-   
+
     let listener = TcpListener::bind("127.0.0.1:11111").await?;
     let (tx, _rx) = broadcast::channel(10);
     let clients: Arc<Mutex<HashMap<SocketAddr, Uuid>>> = Arc::new(Mutex::new(HashMap::new()));
-    
 
     loop {
         let clients = Arc::clone(&clients);
@@ -34,50 +31,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
             match &db_pool {
                 Ok(pool) => {
                     log::info!("Connected to database: {:?}", pool);
-                },
+                }
                 Err(e) => {
                     log::error!("Failed to connect to database: {}", e);
-                    return
+                    return;
                 }
             };
             let db_pool = db_pool.unwrap();
             loop {
                 tokio::select! {
-                    /*
-                    result = reader.read(&mut buffer) => {
-                        let n = match result {
-                            Ok(0) => return,
-                            Ok(n) => n,
-                            Err(e) => {
-                                eprintln!("Failed to read from socket: {}", e);
-                                return;
-                            }
-                        };
-
-                        let msg = match String::from_utf8(buffer[..n].to_vec()) {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                eprintln!("Failed to parse message: {}", e);
-                                continue;
-                            }
-                        };
-
-                        let broadcast_msg = (client_id, msg);
-
-                        if tx.send(broadcast_msg).is_err() {
-                            break;
-                        }
-                    }
-                     */
                     result = read_from_stream(&mut reader) => {
-                        let n = match &result {
+                        match &result {
                             Ok(msg) => {
                                 match &msg {
                                     MessageType::Error(e) => {
                                         return log::error!("Error: {}", e)
                                     }
                                     MessageType::Auth(client_id) => {
-                                        // TODO: Auth user
                                         log::info!("Authenticating client: {}", client_id);
                                         let uid = Uuid::try_parse(client_id);
                                         if uid.is_err() {
@@ -86,15 +56,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             match auth_client(&db_pool, uid.unwrap()).await {
                                                 Ok(uid) => {
                                                     log::info!("Authenticated client: {}", uid.to_string());
-                                                    
+
                                                     let msg = result.unwrap();
                                                     let addr = socket_addr.to_string().clone();
                                                     let broadcast_msg = (addr, msg);
                                                     if tx.send(broadcast_msg).is_err() {
                                                         break;
                                                     }
-                                                    clients.lock().unwrap().insert(socket_addr.clone(), Uuid::try_parse(&uid.to_string()).unwrap());
-                                                    
+                                                    clients.lock().unwrap().insert(socket_addr, Uuid::try_parse(&uid.to_string()).unwrap());
+
                                                 },
                                                 Err(e) => {
                                                     return log::error!("Error: {}", e)
@@ -112,7 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         } else {
                                             let uid = &clients.lock().unwrap().get(&socket_addr).unwrap().clone();
                                             // Save message to DB
-                                            match save_message(&db_pool, uid.to_string(), serialize_message(&msg).unwrap()).await.is_err() {
+                                            match save_message(&db_pool, uid.to_string(), &msg).await.is_err() {
                                                 false => (),
                                                 true => {
                                                     log::error!("Cannot save message to DB");
@@ -139,16 +109,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         };
 
                         let (recv_socket_addr, msg) = received;
-                        let mut send_msg = false;
-                        match &msg {
+
+                        let send_msg = match &msg {
                             MessageType::Auth(s) => {
                                 log::info!("Authenticating client: {}", s);
-                                send_msg = recv_socket_addr.as_str() == &socket_addr.to_string();
+                                recv_socket_addr.as_str() == socket_addr.to_string()
                             }
                             _ => {
-                                send_msg = recv_socket_addr.as_str() != &socket_addr.to_string();
+                                recv_socket_addr.as_str() != socket_addr.to_string()
                             }
-                        }
+                        };
 
                         if send_msg {
                             let result = write_to_stream(&mut writer, &msg).await;
@@ -156,7 +126,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Ok(_) => (),
                                 Err(e) => {
                                     log::error!("Disconnecting client: {}", e);
-                                    ()
                                 },
                             }
                         }

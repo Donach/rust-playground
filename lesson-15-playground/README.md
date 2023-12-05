@@ -1,11 +1,17 @@
 # How to run
 ## Client
-`cargo run --bin client <hostname> <port>`
+`cargo run --bin client <hostname> <port> <uid>`
 
 ## Server
 `cargo run --bin server <hostname> <port>`
 
-You can omit both hostname and port for each application, as it will default to running locally on port 11111.
+You can omit all arguments for each application, as it will default to running locally on port 11111, and client would generate a new UID.
+
+# Install sqlx-cli
+`cargo install sqlx-cli`
+
+# In case you deleted db, create it with 
+`cargo sqlx database create`
 
 # Sending data from client to server
 ## Message
@@ -24,6 +30,9 @@ You can exit the client by typing `.quit` or submitting empty command/message.
 
 # Main changes from previous version
 ## 1. Refactoring
-Refactored few parts of code to better handle simple text and empty entry, which should correctly quit the client program
-## 2. Logging
-Using log and simple_logger to display nicer logging messages into stdout.
+Refactored to use tokio async framework on both server and client side.
+## 2. Database
+Added support for sqlite database, which is used to store messages and client IDs
+## 3. Better error handling
+Previous version had still issues with client reconnecting that should be solved now
+In general, no program should panic
