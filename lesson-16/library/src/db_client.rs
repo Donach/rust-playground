@@ -146,6 +146,15 @@ pub async fn get_messages(db: &Pool<Sqlite>) -> Result<Vec<Message>, sqlx::Error
     Ok(messages)
 }
 
+pub async fn delete_message(id: String, db: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
+    // Delete also any messages sent by this user
+    sqlx::query("DELETE FROM messages WHERE id = $1")
+        .bind(&id)
+        .execute(db)
+        .await?;
+
+    Ok(())
+}
 
 pub async fn delete_user(uid: String, db: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
     // Delete also any messages sent by this user

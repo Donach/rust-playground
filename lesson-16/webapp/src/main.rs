@@ -6,7 +6,7 @@ use rocket::{self, get, launch, post, routes, delete, State, serde::{json::Json,
 use sqlx::{Sqlite, Pool, Error};
 use rocket::{response::{Redirect}, form::Form};
 
-use library::db_client::{setup_database_pool, get_messages as db_get_messages, delete_user as db_delete_user, get_users as db_get_users};
+use library::db_client::{setup_database_pool, get_messages as db_get_messages, delete_user as db_delete_user, get_users as db_get_users, delete_message as db_delete_message};
 
 use rocket_dyn_templates::{Template, context, handlebars};
 use rocket::response::content::RawHtml;
@@ -35,6 +35,20 @@ struct DeleteUserForm {
 #[post("/delete_user", data = "<user_form>")]
 async fn delete_user(user_form: Form<DeleteUserForm>, db: &State<Pool<Sqlite>>) -> Result<Redirect, Status> {
     let res = db_delete_user(user_form.uid.clone(), db).await;
+    match res {
+        Ok(_) => Ok(Redirect::to(uri!(index))),
+        Err(_) => Err(Status::InternalServerError),
+    }
+}
+
+#[derive(FromForm)]
+struct DeleteMessageForm {
+    id: String,
+}
+
+#[post("/delete_message", data = "<user_form>")]
+async fn delete_message(user_form: Form<DeleteMessageForm>, db: &State<Pool<Sqlite>>) -> Result<Redirect, Status> {
+    let res = db_delete_message(user_form.id.clone(), db).await;
     match res {
         Ok(_) => Ok(Redirect::to(uri!(index))),
         Err(_) => Err(Status::InternalServerError),
@@ -75,9 +89,8 @@ async fn webapp() -> _ {
             handlebars.register_helper("message_as_str", Box::new(message_as_str));
             engines.handlebars = handlebars;
         }))
-        .mount("/", routes![get_messages, get_users, delete_user])
+        .mount("/", routes![index, get_messages, get_users, delete_user, delete_message])
         .manage(setup_database_pool().await.unwrap())
-        .mount("/", routes![index])
 
     
 }
