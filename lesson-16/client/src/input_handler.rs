@@ -1,3 +1,15 @@
+//! Module for handling various input types
+//! 
+//! # Examples
+//! handle_vec_input(vec![".file".to_string(), "/full/path/to/file.txt".to_string()])
+//! handle_vec_input(vec![".image".to_string(), "/full/path/to/image.png".to_string()])
+//! handle_vec_input(vec![".quit".to_string()])
+//! handle_vec_input(vec![".text".to_string(), "Hello World".to_string()])
+//! 
+//! 
+//! There are several defined operations which can be used.
+//! For each operation a function is defined.
+//! "Auth" is only used for authentication, and is not intended to be used manually (but right now it could be).
 use std::{error::Error, fs::File, io::Read, path::Path};
 
 use anyhow::Result;
@@ -119,7 +131,15 @@ fn handle_operation(operation: &Operation, input: &str) -> Result<MessageType, B
         Operation::Auth => handle_auth(input),
     }
 }
-
+/// Handles the input from the user
+/// 
+/// # Arguments
+/// `input` - The input from the user, it will be pre-parsed to two parts - "command" as "left" and the rest as "right" part
+/// # Examples
+/// handle_vec_input(vec![".file".to_string(), "/full/path/to/file.txt".to_string()])
+/// handle_vec_input(vec![".image".to_string(), "/full/path/to/image.png".to_string()])
+/// handle_vec_input(vec![".quit".to_string()])
+/// handle_vec_input(vec![".text".to_string(), "Hello World".to_string()])
 pub fn handle_vec_input(input: Vec<String>) -> Result<MessageType, Box<dyn Error>> {
     let operation = Operation::from(input[0].as_str());
     handle_operation(&operation, &input.join(" "))

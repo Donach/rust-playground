@@ -1,4 +1,4 @@
-use crate::db_client::{auth_client, save_message, setup_database_pool};
+use library::db_client::{auth_client, save_message, setup_database_pool};
 use library::{read_from_stream, write_to_stream, MessageType};
 use std::collections::HashMap;
 use std::error::Error;
@@ -7,8 +7,6 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-mod db_client;
-mod test_db_client;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -24,7 +22,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let (socket, socket_addr) = listener.accept().await?;
         let tx = tx.clone();
         let mut rx = tx.subscribe();
-        //let client_id = Uuid::new_v4();
 
         tokio::spawn(async move {
             let (mut reader, mut writer) = socket.into_split();

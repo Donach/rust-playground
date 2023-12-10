@@ -1,21 +1,12 @@
 use std::env;
 use std::error::Error;
 
-use library::{serialize_message_as_bin, MessageType};
+use crate::{serialize_message_as_bin, MessageType, get_timestamp, Message, deserialize_message, User, deserialize_message_as_bin};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Pool, Sqlite};
 use uuid::Uuid;
-/*
-struct User {
-    uid: Uuid,
-}
 
-struct Message {
-    id: Uuid,
-    uid: Uuid,
-    message: String, // Deserializes into MessageType
-}
-*/
+
 pub async fn setup_database_pool() -> Result<Pool<Sqlite>, sqlx::Error> {
     let pool = SqlitePoolOptions::new()
         .connect(&env::var("DATABASE_URL").unwrap())
@@ -30,10 +21,17 @@ pub async fn setup_database_pool() -> Result<Pool<Sqlite>, sqlx::Error> {
     .execute(&pool)
     .await?;
 
+/*     sqlx::query!(
+        "DROP TABLE MESSAGES",
+    )
+    .execute(&pool)
+    .await?; */
+
     sqlx::query!(
         "CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
             uid TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
             message BLOB,
             FOREIGN KEY(uid) REFERENCES users(uid)
          )",
@@ -91,14 +89,77 @@ pub async fn save_message(
     // Insert message
     let ser_message = serialize_message_as_bin(message).unwrap();
     let message_id: String = Uuid::new_v4().to_string();
+    let time = get_timestamp();
     sqlx::query!(
-        "INSERT INTO messages (id, uid, message) VALUES (?, ?, ?)",
+        "INSERT INTO messages (id, uid, timestamp, message) VALUES (?, ?, ?, ?)",
         message_id,
         uid,
+        time,
         ser_message
     )
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+pub async fn get_users(db: &Pool<Sqlite>) -> Result<Vec<User>, sqlx::Error> {
+    let raw_users = sqlx::query!("SELECT uid FROM users")
+        .fetch_all(db)
+        .await?;
+
+    let mut users = Vec::new();
+    for raw_user in raw_users {
+        users.push(User {
+            uid: raw_user.uid,
+        })
+    };
+    Ok(users)
+}
+pub async fn get_messages(db: &Pool<Sqlite>) -> Result<Vec<Message>, sqlx::Error> {
+    let raw_messages = sqlx::query!("SELECT id, uid, timestamp, message FROM messages")
+        .fetch_all(db)
+        .await?;
+
+    let mut messages = Vec::new();
+    for raw_msg in raw_messages {
+        let msg = &raw_msg.message;
+        let message_type = deserialize_message_as_bin(msg.as_ref().unwrap());
+        if message_type.is_ok() {
+            let message_type = message_type.unwrap();
+
+            let id = &raw_msg.id.unwrap_or_else(|| "default_id".to_string());
+            let uid = &raw_msg.uid;
+            let timestamp = &raw_msg.timestamp;
+
+            messages.push(Message {
+                id: id.to_string(),
+                uid: uid.to_string(),
+                timestamp: timestamp.to_string(),
+                message: message_type,
+            });
+        } else {
+            log::error!("Error deserializing message: {}", message_type.err().unwrap());
+        }
+    }
+
+    Ok(messages)
+}
+
+
+pub async fn delete_user(uid: String, db: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
+    // Delete also any messages sent by this user
+    sqlx::query("DELETE FROM messages WHERE uid = $1")
+        .bind(&uid)
+        .execute(db)
+        .await?;
+
+    sqlx::query("DELETE FROM users WHERE uid = $1")
+        .bind(uid)
+        .execute(db)
+        .await?;
+
+    
 
     Ok(())
 }

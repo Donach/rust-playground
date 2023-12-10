@@ -10,7 +10,7 @@ use std::{
     io::{self, Cursor},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH}, fmt::Display,
 };
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ use thiserror::Error;
 
 use eyre::Result;
 
-
+pub mod db_client;
 /// 
 /// 
 
@@ -59,6 +59,7 @@ pub enum ConnectionError {
     ClientDisconnected(String),
 }
 
+/// Main struct to exchange data between client and server.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MessageType {
     Text(String),
@@ -68,24 +69,64 @@ pub enum MessageType {
     Auth(String),
 }
 
+impl Display for MessageType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageType::Text(t) => write!(f, "{}", t),
+            MessageType::Image(_) => write!(f, "Image"),
+            MessageType::File(_, _) => write!(f, "File"),
+            MessageType::Error(e) => write!(f, "Error: {}", e),
+            MessageType::Auth(a) => write!(f, "Auth: {}", a),
+
+        }
+    }
+}
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct User {
+    pub uid: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Message {
+    pub id: String,
+    pub uid: String,
+    pub timestamp: String,
+    pub message: MessageType, // Assuming BLOB is binary data
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MessageView {
+    id: String,
+    uid: String,
+}
+
+/// Serialize a MessageType using JSON.
+/// Used for client-server communication
 pub fn serialize_message(message: &MessageType) -> Result<String, crate::DataProcessingError> {
     Ok(serde_json::to_string(message)?)
 }
 
+/// De-Serialize a MessageType using JSON.
+/// Used for client-server communication
 pub fn deserialize_message(data: &[u8]) -> Result<MessageType, crate::DataProcessingError> {
     Ok(serde_json::from_slice(data)?)
 }
 
+/// De-Serialize a MessageType using binary.
+/// Used for storing data in DB
 pub fn serialize_message_as_bin(
     message: &MessageType,
 ) -> Result<Vec<u8>, crate::DataProcessingError> {
     Ok(bincode::serialize(message).unwrap())
 }
 
+/// De-Serialize a MessageType using binary.
+/// Used for retrieving data from DB
 pub fn deserialize_message_as_bin(data: &[u8]) -> Result<MessageType, crate::DataProcessingError> {
     Ok(bincode::deserialize(data).unwrap())
 }
 
+/// Generic user I/O function, waits for user input.
 pub fn await_input() -> Result<String, crate::DataProcessingError> {
     let mut input = String::new();
     match io::stdin().read_line(&mut input) {
@@ -153,6 +194,8 @@ pub fn get_addr(args: Vec<String>) -> Result<(SocketAddrV4, Uuid), crate::DataPr
     ))
 }
 
+/// Generic function to read from "ReadHalf" of stream
+/// Uses JSON encoding to deserialize the MessageType read.
 pub async fn read_from_stream(
     stream: &mut OwnedReadHalf,
 ) -> Result<MessageType, crate::DataProcessingError> {
@@ -184,6 +227,8 @@ pub async fn read_from_stream(
     }
 }
 
+/// Generic function to write to "WriteHalf" of stream
+/// Uses JSON encoding to serialize the MessageType.
 pub async fn write_to_stream(
     stream: &mut OwnedWriteHalf,
     message: &MessageType,
@@ -209,6 +254,7 @@ pub async fn write_to_stream(
     Ok(())
 }
 
+/// Handler of Messages received
 pub async fn handle_stream_message(message: MessageType) -> MessageType {
     match &message {
         MessageType::Auth(uid) => {
@@ -247,7 +293,8 @@ pub async fn handle_stream_message(message: MessageType) -> MessageType {
     }
 }
 
-fn get_timestamp() -> String {
+/// Get current timestamp as miliseconds from UNIX_EPOCH
+pub fn get_timestamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

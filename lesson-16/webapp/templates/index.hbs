@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rust Web App</title>
+    <!-- Include your styles here -->
+</head>
+<body>
+    <div class="container">
+        <!-- Users Table -->
+        <div class="box">
+            <h2>Users</h2>
+            <table border="1">
+                {{#each users}}
+                <tr>
+                    <td>{{this.uid}}</td>
+                    <td>
+                        <!-- Delete Form for Each User -->
+                        <form action="/delete_user" method="post">
+                            <input type="hidden" name="uid" value="{{this.uid}}" />
+                            <input type="submit" value="Delete" />
+                        </form>
+                    </td>
+                </tr>
+                {{/each}}
+            </table>
+        </div>
+
+        <!-- Messages Table -->
+        <div class="box">
+            <h2>Messages</h2>
+            <table border="1">
+                <tr>
+                    <td>ID</td>
+                    <td>User ID</td>
+                    <td>Timestamp</td>
+                    <td>Message</td>
+                    <td>Action</td>
+                </tr>
+                {{#each messages}}
+                <tr>
+                    <td>{{this.id}}</td>
+                    <td>{{this.uid}}</td>
+                    <td>{{this.timestamp}}</td>
+                    <td>{{message_as_str this.message}}</td>
+                    <td>
+                        <!-- Form for deleting message -->
+                        <form action="/delete_message" method="post">
+                            <input type="hidden" name="id" value="{{this.id}}" />
+                            <input type="submit" value="Delete" />
+                        </form>
+                    </td>
+                </tr>
+                {{/each}}
+            </table>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,3 +1,17 @@
+#![deny(missing_docs)]
+//! Client for connecting to server
+//! 
+//! # Usage
+//! 
+//! ```
+//! cargo run --bin client
+//! ```
+//! 
+//! An async client chat application which can connect to server and send messages to other connected clients.
+//! Currently has few limitations:
+//! - Can only send single line of text
+//! - Can only send single message at a time
+//! - Cannot load "missed" messages from server
 use std::error::Error;
 
 use std::net::SocketAddrV4;
@@ -14,7 +28,7 @@ use uuid::Uuid;
 
 use crate::input_handler::handle_vec_input;
 
-// Currently can process only single line of text, known limitation
+/// Currently can process only single line of text, known limitation
 fn process_input(tx: Sender<Vec<String>>) -> Result<(), Box<dyn Error>> {
     loop {
         println!("Enter operation to perform: ");
@@ -149,6 +163,12 @@ async fn handle_auth(
     Ok(true)
 }
 
+/// Start multi-threaded client application
+/// 
+/// # Arguments
+/// (SocketAddrV4, Uuid) - The address of the server and the uid of the client, generated on the client side automatically,
+/// if the user does not specify any. The uid is used for authentication and should be reused.
+/// 
 pub async fn start_multithreaded(conninfo: (SocketAddrV4, Uuid)) -> Result<(), Box<dyn Error>> {
     let (address, uid) = conninfo;
     log::info!("Starting interactive mode @{}", address);

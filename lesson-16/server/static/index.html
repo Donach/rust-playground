@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rust Web App</title>
+    <style>
+        .container {
+            display: flex;
+            justify-content: space-between;
+        }
+        .box {
+            width: 45%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="box">
+            <h2>Users</h2>
+            <table border="1">
+                <!-- Iterate over users and create a row for each -->
+                <!-- Example row: -->
+                <tr>
+                    <td>User1</td>
+                    <td>
+                        <form action="/delete_user" method="post">
+                            <input type="hidden" name="uid" value="User1UID" />
+                            <input type="submit" value="-" />
+                        </form>
+                    </td>
+                </tr>
+                <!-- Repeat for each user -->
+            </table>
+        </div>
+        <div class="box">
+            <h2>Messages</h2>
+            <!-- Filter Form -->
+            <form action="/filter_messages" method="get">
+                <label for="uid">Filter by UID:</label>
+                <input type="text" id="uid" name="uid" />
+                <input type="submit" value="Filter" />
+            </form>
+            <table border="1">
+                <!-- Iterate over messages and create a row for each -->
+                <!-- Example row: -->
+                <tr>
+                    <td>Message1</td>
+                    <td>
+                        <form action="/delete_message" method="post">
+                            <input type="hidden" name="message_id" value="Message1ID" />
+                            <input type="submit" value="-" />
+                        </form>
+                    </td>
+                </tr>
+                <!-- Repeat for each message -->
+            </table>
+        </div>
+    </div>
+</body>
+</html>
