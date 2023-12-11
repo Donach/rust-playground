@@ -4,7 +4,7 @@
 //! # Usage
 //! 
 //! ```
-//! cargo run --bin client
+//! cargo run --bin client <hostname> <port> <Uuid>
 //! ```
 //! 
 //! An async client chat application which can connect to server and send messages to other connected clients.
@@ -21,12 +21,12 @@ use library::{
     await_input, handle_stream_message, read_from_stream, write_to_stream, ConnectionError,
     DataProcessingError, MessageType,
 };
+use library::input_handler::handle_vec_input;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::time::{self, Duration};
 use uuid::Uuid;
 
-use crate::input_handler::handle_vec_input;
 
 /// Currently can process only single line of text, known limitation
 fn process_input(tx: Sender<Vec<String>>) -> Result<(), Box<dyn Error>> {

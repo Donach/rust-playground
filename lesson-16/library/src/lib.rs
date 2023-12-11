@@ -1,16 +1,17 @@
 //! Library functions for chat application
-//! 
-//! This library provides functions for chat application. Every functionality that is somehow duplicated 
+//!
+//! This library provides functions for chat application. Most functionality that is somehow duplicated
 //! between the client and the server is implemented here.
-//! 
-//! 
+//!
+//!
 use anyhow::Context;
 use std::{
     env,
+    fmt::Display,
     io::{self, Cursor},
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH}, fmt::Display,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 
@@ -32,8 +33,9 @@ use thiserror::Error;
 use eyre::Result;
 
 pub mod db_client;
-/// 
-/// 
+mod test_db_client;
+pub mod input_handler;
+mod test_input_handler;
 
 #[derive(Error, Debug)]
 pub enum DataProcessingError {
@@ -60,6 +62,7 @@ pub enum ConnectionError {
 }
 
 /// Main struct to exchange data between client and server.
+/// Server/Client exchange serialized data as JSON, DB stores it as binary
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MessageType {
     Text(String),
@@ -77,7 +80,6 @@ impl Display for MessageType {
             MessageType::File(_, _) => write!(f, "File"),
             MessageType::Error(e) => write!(f, "Error: {}", e),
             MessageType::Auth(a) => write!(f, "Auth: {}", a),
-
         }
     }
 }
@@ -91,13 +93,7 @@ pub struct Message {
     pub id: String,
     pub uid: String,
     pub timestamp: String,
-    pub message: MessageType, // Assuming BLOB is binary data
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct MessageView {
-    id: String,
-    uid: String,
+    pub message: MessageType,
 }
 
 /// Serialize a MessageType using JSON.
@@ -141,19 +137,18 @@ pub fn await_input() -> Result<String, crate::DataProcessingError> {
     }
 }
 
-// Returns a SocketAddr, using default if cannot parse and/or no args given
+/// Returns a (SocketAddr, Uuid), using default if cannot parse and/or no args given
 pub fn get_addr(args: Vec<String>) -> Result<(SocketAddrV4, Uuid), crate::DataProcessingError> {
     // Evaluate args
     //println!("{:?}", args);
     // Validate args for hostname and port
     let hostname: Result<Ipv4Addr, std::net::AddrParseError>;
     let port: Result<u16, std::num::ParseIntError>;
-    let uid: Result<Uuid, uuid::Error>;
-    if args.len() < 4 {
+    let mut uid: Result<Uuid, uuid::Error> = Ok(Uuid::new_v4());
+    if args.len() < 3 {
         log::warn!("Usage: server/client <hostname> <port> <uid>; using default values now...");
         hostname = "127.0.0.1".parse::<Ipv4Addr>();
         port = "11111".parse::<u16>();
-        uid = Ok(Uuid::new_v4());
     } else {
         hostname = args[1].parse::<Ipv4Addr>();
         match hostname {
@@ -175,15 +170,16 @@ pub fn get_addr(args: Vec<String>) -> Result<(SocketAddrV4, Uuid), crate::DataPr
                 panic!()
             }
         }
-
-        uid = args[3].parse::<Uuid>();
-        match uid {
-            Ok(p) => {
-                log::info!("Parsed uid: {:?}", &p);
-            }
-            Err(e) => {
-                log::error!("Error parsing uid: {:?}", e);
-                panic!()
+        if args.len() == 4 {
+            uid = args[3].parse::<Uuid>();
+            match uid {
+                Ok(p) => {
+                    log::info!("Parsed uid: {:?}", &p);
+                }
+                Err(e) => {
+                    log::error!("Error parsing uid: {:?}", e);
+                    panic!()
+                }
             }
         }
     }
@@ -302,6 +298,7 @@ pub fn get_timestamp() -> String {
         .to_string()
 }
 
+/// Helper function to build path to files
 async fn prepare_path(
     message: &MessageType,
     file_name: &str,
@@ -329,6 +326,7 @@ async fn prepare_path(
     }
 }
 
+/// Helper function to write file into files/ dir
 async fn write_file(
     message: &MessageType,
     file: &[u8],
@@ -357,7 +355,8 @@ async fn write_file(
         }
     }
 }
-
+/// Helper function to write image into files/ dir
+/// Images are encoded as PNG, and renamed to <timestamp>.png
 async fn write_image(message: &MessageType, file: &[u8]) -> Result<String, DataProcessingError> {
     let current_timestamp = get_timestamp();
     let path = prepare_path(message, "", &current_timestamp).await?;

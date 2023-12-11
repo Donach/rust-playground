@@ -6,6 +6,9 @@
 </head>
 <body>
     <div class="container">
+        <form action="/generate_test_data" method="post">
+                <input type="submit" value="Create test data" />
+            </form>
         <!-- Users Table -->
         <div class="box">
             <h2>Users</h2>
@@ -26,8 +29,14 @@
         </div>
 
         <!-- Messages Table -->
+        
         <div class="box">
             <h2>Messages</h2>
+            <form action="/filter_messages" method="get">
+                <label for="uid">Filter by User ID:</label>
+                <input type="text" id="uid" name="uid" />
+                <input type="submit" value="Filter" />
+            </form>
             <table border="1">
                 <tr>
                     <td>ID</td>

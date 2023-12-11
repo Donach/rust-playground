@@ -16,3 +16,4 @@ rocket_dyn_templates = {version = "0.1", features = ["handlebars"]  }
 serde = { version = "1.0.192", features = ["derive"] }
 handlebars =  { version = "4.5.0", features = ["dir_source"] }
 serde_json = "1.0.108"
+rand = "0.8.5"

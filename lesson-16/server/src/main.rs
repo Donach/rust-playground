@@ -1,6 +1,15 @@
+//! Server of chat application, able to receive and send messages from/to clients
+//! 
+//! # Usage
+//! 
+//! ```
+//! cargo run --bin server <hostname> <port>
+//! ```
+//! 
 use library::db_client::{auth_client, save_message, setup_database_pool};
-use library::{read_from_stream, write_to_stream, MessageType};
+use library::{read_from_stream, write_to_stream, MessageType, get_addr};
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -12,8 +21,8 @@ use uuid::Uuid;
 async fn main() -> Result<(), Box<dyn Error>> {
     simple_logger::SimpleLogger::new().env().init().unwrap();
     dotenvy::dotenv()?;
-
-    let listener = TcpListener::bind("127.0.0.1:11111").await?;
+    let (addr, _) = get_addr(env::args().collect()).unwrap();
+    let listener = TcpListener::bind(addr).await?;
     let (tx, _rx) = broadcast::channel(10);
     let clients: Arc<Mutex<HashMap<SocketAddr, Uuid>>> = Arc::new(Mutex::new(HashMap::new()));
 

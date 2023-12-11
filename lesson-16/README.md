@@ -36,3 +36,8 @@ Added support for sqlite database, which is used to store messages and client ID
 ## 3. Better error handling
 Previous version had still issues with client reconnecting that should be solved now
 In general, no program should panic
+
+# L16 HW Changes
+- Moved db_client.rs from server to library
+- Moved input_handler.rs from client to library
+- Added tests for input_handler and db_client

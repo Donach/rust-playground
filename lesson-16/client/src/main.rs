@@ -16,10 +16,7 @@ use library::get_addr;
 
 
 use crate::main_multi::start_multithreaded;
-mod input_handler;
 mod main_multi;
-mod test_input_handler;
-mod webapp;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
