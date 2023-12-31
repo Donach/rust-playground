@@ -18,17 +18,18 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-
-use library::counters::{init_counters, inc_client_count, inc_msg_count, dec_client_count};
+mod counters;
+use counters::{init_counters, inc_client_count, inc_msg_count, dec_client_count};
 
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     simple_logger::SimpleLogger::new().env().init().unwrap();
-    let spawn = tokio::spawn(async move {
-        init_counters().await
-    });
     dotenvy::dotenv()?;
+    // Start metrics endpoint
+    tokio::spawn(async move {
+        init_counters().await;
+    });
 
     let (addr, _) = get_addr(env::args().collect()).unwrap();
     let listener = TcpListener::bind(addr).await?;
@@ -62,7 +63,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 inc_msg_count();
                                 match &msg {
                                     MessageType::Error(e) => {
-                                        return log::error!("Error: {}", e)
+                                        return log::error!("Error #0: {}", e)
                                     }
                                     MessageType::Auth(client_id) => {
                                         log::info!("Authenticating client: {}", client_id);
@@ -85,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                                 },
                                                 Err(e) => {
-                                                    return log::error!("Error: {}", e)
+                                                    return log::error!("Error #1: {}", e)
                                                 }
                                             };
                                         }
@@ -113,7 +114,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             },
                             Err(e) => {
-                                return log::error!("Error: {}", e)
+                                dec_client_count();
+                                return log::error!("Error #2: {}", e)
                             }
                         };
                     }

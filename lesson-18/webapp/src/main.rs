@@ -13,7 +13,6 @@
 
 use handlebars::{handlebars_helper, Handlebars};
 
-use library::counters::get_metrics as server_get_metrics;
 use library::{db_client::save_message, Message, MessageType, User};
 use rocket::{
     self,
@@ -22,7 +21,7 @@ use rocket::{
     http::Status,
     launch, post, routes,
     serde::{json::Json, Serialize},
-    uri, Responder, State,
+    uri, State,
 };
 use rocket::{form::Form, response::Redirect};
 use sqlx::{types::Uuid, Pool, Sqlite};
@@ -127,15 +126,17 @@ async fn filter_messages(uid: String, db: &State<Pool<Sqlite>>) -> RawHtml<Templ
     RawHtml(Template::render("index", context))
 }
 
-#[derive(Responder)]
+/* #[derive(Responder)]
 #[response(status = 200, content_type = "text/plain")]
-struct RawMetrics(Vec<u8>);
+struct RawMetrics(String);
 
 #[get("/metrics")]
-fn get_metrics_endpoint() -> RawMetrics {
+async fn get_metrics_endpoint() -> RawMetrics {
     let data = server_get_metrics();
+    println!("{}", data);
+    //let data = serde_json::to_string(&data).unwrap();
     RawMetrics(data)
-}
+} */
 
 #[derive(Serialize)]
 struct Context {
@@ -176,7 +177,7 @@ async fn webapp() -> _ {
                 delete_message,
                 filter_messages,
                 generate_test_data,
-                get_metrics_endpoint
+                //get_metrics_endpoint
             ],
         )
         .manage(setup_database_pool().await.unwrap())

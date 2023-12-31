@@ -1,5 +1,8 @@
-use prometheus::{Encoder, IntCounter, Gauge, Opts};
+use axum::{http::StatusCode, routing::get, Router, response::IntoResponse};
+use prometheus::{Encoder, Gauge, TextEncoder, IntCounter, Opts};
+
 use lazy_static::lazy_static;
+use tokio::net::TcpListener;
 
 lazy_static! {
     static ref METRICS_COUNTER: IntCounter = IntCounter::new("http_metrics_counter", "How many times have metrics been scraped").unwrap();
@@ -7,16 +10,15 @@ lazy_static! {
     static ref CLIENT_COUNT: Gauge = Gauge::with_opts(Opts::new("http_client_gauge", "How many clients are currently connected")).expect("metric can be created");
 }
 
-pub fn get_metrics() -> Vec<u8> {
+async fn get_metrics() -> impl IntoResponse {
     METRICS_COUNTER.inc();
-    let encoder = prometheus::TextEncoder::new();
+    let encoder = TextEncoder::new();
+    let mut buffer = vec![];
 
-    let mut buffer = Vec::new();
-
-    let metric_families = prometheus::default_registry().gather();
+    let metric_families = prometheus::gather();
     encoder.encode(&metric_families, &mut buffer).unwrap();
 
-    buffer
+    (StatusCode::OK, buffer)
 }
 
 
@@ -43,4 +45,11 @@ pub async fn init_counters() {
     prometheus::default_registry()
     .register(Box::new(CLIENT_COUNT.clone()))
     .expect("Failed to register client counter");
+
+    let app = Router::new()
+        .route("/metrics", get(get_metrics));
+
+    let listener = TcpListener::bind("172.17.0.1:8001").await.unwrap();
+
+    axum::serve(listener, app).await.unwrap();
 }

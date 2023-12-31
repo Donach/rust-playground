@@ -37,8 +37,6 @@ mod test_db_client;
 pub mod input_handler;
 mod test_input_handler;
 
-pub mod counters;
-
 #[derive(Error, Debug)]
 pub enum DataProcessingError {
     #[error("Data not found: {0}")]

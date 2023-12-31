@@ -44,7 +44,9 @@ In general, no program should panic
 
 # Metrics via Prometheus
 ## Setup
-The setup involves Prometheus for metrics tracking. If you want to run the Prometheus, make sure to update IP in `prometheus.yml` appropriately to your host where the metrics server will run (default is localhost:8001 - however you need to use the "docker" IP of your computer if you run it locally)
+The setup involves Prometheus for metrics tracking. If you want to run the Prometheus, make sure to update IP in `prometheus.yml` appropriately to your host where the metrics server will run (default is <docker_local_ip>:8001 - however you need to use your "docker" IP of your computer if you run it locally)
+
+To change the IP, change it in `counters.rs` in server crate, and also in `prometheus.yml`.
 
 To start, simply run in root of this project:
 `docker compose up`
