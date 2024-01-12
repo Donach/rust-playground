@@ -33,9 +33,11 @@ use thiserror::Error;
 use eyre::Result;
 
 pub mod db_client;
-mod test_db_client;
 pub mod input_handler;
+mod test_db_client;
 mod test_input_handler;
+
+pub mod metrics;
 
 #[derive(Error, Debug)]
 pub enum DataProcessingError {

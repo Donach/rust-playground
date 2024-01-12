@@ -12,8 +12,9 @@
 //! - load testing data into DB
 
 use handlebars::{handlebars_helper, Handlebars};
+use sqlx::{types::Uuid, Pool, Sqlite};
 
-use library::{db_client::save_message, Message, MessageType, User};
+use rocket::response::content::RawHtml;
 use rocket::{
     self,
     form::FromForm,
@@ -24,16 +25,16 @@ use rocket::{
     uri, State,
 };
 use rocket::{form::Form, response::Redirect};
-use sqlx::{types::Uuid, Pool, Sqlite};
+use rocket_dyn_templates::{handlebars, Template};
 
 use library::db_client::{
     auth_client, delete_message as db_delete_message, delete_user as db_delete_user,
     get_messages_all as db_get_messages, get_messages_user as db_get_messages_user,
     get_users as db_get_users, setup_database_pool,
 };
+use library::{db_client::save_message, metrics, Message, MessageType, User};
 
-use rocket::response::content::RawHtml;
-use rocket_dyn_templates::{handlebars, Template};
+use server::server_main;
 
 fn generate_random_message() -> String {
     use rand::{thread_rng, Rng};
@@ -126,17 +127,18 @@ async fn filter_messages(uid: String, db: &State<Pool<Sqlite>>) -> RawHtml<Templ
     RawHtml(Template::render("index", context))
 }
 
-/* #[derive(Responder)]
-#[response(status = 200, content_type = "text/plain")]
-struct RawMetrics(String);
+//#[derive(Responder)]
+//#[response(status = 200, content_type = "text/plain")]
+//struct RawMetrics(String);
 
 #[get("/metrics")]
-async fn get_metrics_endpoint() -> RawMetrics {
-    let data = server_get_metrics();
+async fn get_metrics_endpoint() -> Result<String, Status> {
+    let data = metrics::get_metrics()
+        .await
+        .map_err(|_| Status::BadRequest)?;
     println!("{}", data);
-    //let data = serde_json::to_string(&data).unwrap();
-    RawMetrics(data)
-} */
+    Ok(data)
+}
 
 #[derive(Serialize)]
 struct Context {
@@ -158,6 +160,9 @@ handlebars_helper!(message_as_str: |msg: MessageType| msg.to_string());
 async fn webapp() -> _ {
     simple_logger::SimpleLogger::new().env().init().unwrap();
     let _dotenv = dotenvy::dotenv();
+    metrics::init_counters();
+
+    rocket::tokio::task::spawn_blocking(|| server_main());
 
     rocket::build()
         //.attach(Template::fairing())
@@ -177,7 +182,7 @@ async fn webapp() -> _ {
                 delete_message,
                 filter_messages,
                 generate_test_data,
-                //get_metrics_endpoint
+                get_metrics_endpoint
             ],
         )
         .manage(setup_database_pool().await.unwrap())

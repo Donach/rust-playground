@@ -3,7 +3,7 @@
 `cargo run --bin client <hostname> <port> <uid>`
 
 ## Server
-`cargo run --bin server <hostname> <port>`
+`cargo run --bin webapp <hostname> <port>`
 
 You can omit all arguments for each application, as it will default to running locally on port 11111, and client would generate a new UID.
 
